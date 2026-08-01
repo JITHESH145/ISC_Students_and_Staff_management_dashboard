@@ -139,7 +139,7 @@ export default function Reports() {
       </div>
 
       {/* Summary tiles */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:16, marginBottom:18 }}>
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(170px,1fr))', gap:16, marginBottom:18 }}>
         <div style={{ background:'var(--grad-brand)', borderRadius:14, padding:'16px 20px', color:'#fff', boxShadow:'var(--shadow-md)' }}>
           <div style={{ fontSize:12, color:'rgba(255,255,255,.85)' }}>
             {dateFilter && isCEO ? `Reports on ${isoToDisplay(dateFilter)}` : 'Total Reports'}

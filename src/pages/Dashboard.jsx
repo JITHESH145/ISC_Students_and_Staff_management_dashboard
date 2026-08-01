@@ -486,7 +486,7 @@ export default function Dashboard() {
 
       {/* KPI tiles */}
       {isCEOorAdmin ? (
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:16, marginBottom:18 }}>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(170px,1fr))', gap:16, marginBottom:18 }}>
           {/* Hero tile */}
           <div style={{ background:'var(--grad-brand)', borderRadius:16, padding:'18px 20px', color:'#fff', boxShadow:'var(--shadow-md)', position:'relative', overflow:'hidden', cursor:'pointer' }} onClick={() => navigate('/students')}>
             <div style={{ position:'absolute', right:-20, top:-20, width:110, height:110, borderRadius:'50%', background:'rgba(255,255,255,.10)' }} />
@@ -541,7 +541,7 @@ export default function Dashboard() {
           </div>
         </div>
       ) : (
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:16, marginBottom:18 }}>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(240px,1fr))', gap:16, marginBottom:18 }}>
           <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:16, padding:'18px 20px', boxShadow:'var(--shadow-sm)', cursor:'pointer' }} onClick={() => navigate('/batches')}>
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start' }}>
               <div style={{ fontSize:12.5, color:'var(--text-muted)', fontWeight:500 }}>My Batches</div>

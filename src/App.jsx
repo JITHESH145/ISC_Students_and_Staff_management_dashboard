@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { NotifProvider } from './context/NotifContext';
@@ -69,6 +70,8 @@ const NAV_BY_ROLE = {
 };
 
 function AppShell() {
+  // Mobile: sidebar becomes an off-canvas drawer toggled from the topbar.
+  const [navOpen, setNavOpen] = useState(false);
   const { user, profile, loading } = useAuth();
   if (loading) return <Loading text="Authenticating..." />;
   if (!user)   return <Navigate to="/login" replace />;
@@ -79,9 +82,9 @@ function AppShell() {
   return (
     <NotifProvider>
       <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: 'var(--canvas)' }}>
-        <Sidebar navItems={navItems} />
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          <Topbar />
+        <Sidebar navItems={navItems} open={navOpen} onClose={() => setNavOpen(false)} />
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
+          <Topbar onMenu={() => setNavOpen(true)} />
           <main style={{ flex: 1, overflowY: 'auto', padding: 'var(--page-pad)' }}>
             <ErrorBoundary>
               <Outlet />

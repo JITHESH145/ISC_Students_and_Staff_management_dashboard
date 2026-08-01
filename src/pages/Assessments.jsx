@@ -417,7 +417,7 @@ export default function Assessments({ filterBatchId = null }) {
           { label:'With Results',      value: withResults, color:'var(--amber-ink)' },
         ];
         return (
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:16, marginBottom:18 }}>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(170px,1fr))', gap:16, marginBottom:18 }}>
             {tiles.map(t => (
               <div key={t.label} className={t.hero ? '' : 'card'} style={t.hero
                 ? { background:'var(--grad-brand)', borderRadius:14, padding:'16px 20px', color:'#fff', boxShadow:'var(--shadow-md)' }

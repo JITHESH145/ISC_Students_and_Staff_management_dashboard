@@ -414,7 +414,9 @@ export const addNotification = async (data) =>
 // endpoint is missing or mail env is unset, email is simply a no-op —
 // this is the feature flag (email "turns on" once Vercel env is set).
 const NOTIFY_API = import.meta.env.VITE_NOTIFY_API_BASE ?? '';
-export const sendNotificationEmail = async ({ toEmail, subject, text, fromName }) => {
+export const sendNotificationEmail = async ({
+  toEmail, subject, text, fromName, heading, intro, details, ctaUrl, ctaLabel,
+}) => {
   if (!toEmail) return { status: 'skipped' };
   try {
     const current = auth.currentUser;
@@ -423,7 +425,9 @@ export const sendNotificationEmail = async ({ toEmail, subject, text, fromName }
     const res = await fetch(`${NOTIFY_API}/api/send-email`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ toEmail, subject, text, fromName }),
+      body: JSON.stringify({
+        toEmail, subject, text, fromName, heading, intro, details, ctaUrl, ctaLabel,
+      }),
     });
     if (!res.ok) return { status: 'failed', code: res.status };
     return await res.json().catch(() => ({ status: 'sent' }));
@@ -437,15 +441,23 @@ export const sendNotificationEmail = async ({ toEmail, subject, text, fromName }
 // sendEmail:false). All task/schedule trigger sites call this so the two
 // channels stay in lock-step. `body` is the canonical message field;
 // `message` is accepted for back-compat with older call sites.
+// `details` ([{label, value}, …]) renders as a structured table in the
+// email — pass who assigned it, due date, timing, meet link, etc.
 export const notifyStaff = async ({
   toEmail, type, title, body, message, route, fromName, sendEmail = true,
+  details, intro,
 }) => {
   if (!toEmail) return;
   const text = body ?? message ?? '';
   const inApp = addNotification({ toEmail, type, title, body: text, route, fromName });
   if (sendEmail) {
+    // Deep link back into the app for the email's action button.
+    const ctaUrl = route && typeof window !== 'undefined' && window.location?.origin
+      ? `${window.location.origin}${route}`
+      : undefined;
     sendNotificationEmail({
       toEmail, subject: title || 'ISC SMS Notification', text, fromName,
+      heading: title, intro, details, ctaUrl,
     }).catch(() => {});
   }
   return inApp;

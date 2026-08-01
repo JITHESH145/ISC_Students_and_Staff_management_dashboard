@@ -163,7 +163,7 @@ export default function Documents() {
       {folders.length > 0 && (
         <>
           <div style={{ fontSize:11, fontWeight:700, letterSpacing:'.1em', color:'var(--text-muted)', marginBottom:10 }}>FOLDERS</div>
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:14, marginBottom:24 }}>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(170px,1fr))', gap:14, marginBottom:24 }}>
             {folders.map(f => (
               <div key={f.name} className="card" style={{ padding:'16px 18px', display:'flex', alignItems:'center', gap:13 }}>
                 <div style={{ width:42, height:42, borderRadius:11, background:f.tint, color:f.ink, display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 }}>

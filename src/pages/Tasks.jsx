@@ -81,7 +81,8 @@ export default function Tasks() {
         assignedByEmail: user?.email,
       };
       await addTask(taskData);
-      // In-app + email together (email best-effort via /api/send-email)
+      // In-app + email together (email best-effort via /api/send-email).
+      // `details` renders as a structured table in the email.
       await notifyStaff({
         toEmail:  selectedStaff.email,
         type:     'task',
@@ -89,6 +90,15 @@ export default function Tasks() {
         body:     `New task: "${form.title}"${form.dueDate ? ` — due ${form.dueDate}` : ''}`,
         route:    '/tasks',
         fromName: profile?.name,
+        intro:    `Hi ${selectedStaff.name}, a new task has been assigned to you on ISC SMS.`,
+        details: [
+          { label: 'Task',        value: form.title },
+          { label: 'Assigned by', value: `${profile?.name || 'ISC SMS'}${user?.email ? ` (${user.email})` : ''}` },
+          { label: 'Due date',    value: form.dueDate },
+          { label: 'Priority',    value: PRIO[form.priority]?.label || form.priority },
+          { label: 'Category',    value: form.label },
+          { label: 'Notes',       value: form.notes },
+        ].filter(d => d.value),
       });
       setToast({ message:`Task assigned to ${selectedStaff.name}!`, type:'success' });
       setShowModal(false);
@@ -263,7 +273,7 @@ export default function Tasks() {
 
       {/* Board View */}
       {view === 'board' && (
-        <div style={{ display:'flex', gap:16, alignItems:'flex-start' }}>
+        <div className="task-board" style={{ display:'flex', gap:16, alignItems:'flex-start' }}>
           {COLUMNS.map(col => {
             const colTasks = grouped[col.key] || [];
             return (

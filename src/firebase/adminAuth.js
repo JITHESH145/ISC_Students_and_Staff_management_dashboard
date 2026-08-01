@@ -9,8 +9,14 @@ import {
   sendPasswordResetEmail,
   signOut
 } from 'firebase/auth';
-import { doc, setDoc } from 'firebase/firestore';
+import {
+  doc, setDoc, deleteDoc, getDocs, query, where, collection, limit
+} from 'firebase/firestore';
 import { db } from './config';
+
+// Company-domain rule (mirrors AuthContext — kept literal here to avoid
+// a context import inside the firebase layer).
+const ALLOWED_EMAIL_DOMAIN = 'internationalskillsclub.com';
 
 const SECONDARY_APP_NAME = 'isc-staff-creator';
 
@@ -24,9 +30,61 @@ const getSecondaryApp = () => {
   return initializeApp(mainApp.options, SECONDARY_APP_NAME);
 };
 
+// Writes the three Firestore docs every staff member needs.
+const writeStaffDocs = async ({ uid, name, email, role, subjects }) => {
+  await setDoc(doc(db, 'staff', uid), {
+    uid,
+    name,
+    email,
+    role,
+    subjects:       subjects || [],
+    active:         true,
+    needsAuthSetup: false, // no Firebase Console needed!
+    createdAt:      new Date().toISOString(),
+  });
+
+  // Authorization source of truth — rules check /roles/{uid}, not the
+  // staff profile (which the user could otherwise self-edit).
+  await setDoc(doc(db, 'roles', uid), { role, active: true });
+
+  // Safe directory mirror for staff-facing pickers (no fcmToken).
+  await setDoc(doc(db, 'staffDirectory', uid), {
+    name, email, role, subjects: subjects || [], active: true,
+  });
+};
+
+// Deleting a staff member can only remove their Firestore docs — the
+// browser cannot delete another user's Firebase Auth account. A
+// tombstone in /deletedStaff (CEO-only) records the orphaned Auth
+// account's uid + email so a later re-add can adopt it instead of
+// failing with auth/email-already-in-use.
+export const recordDeletedStaffAccount = async ({ uid, email, name, role }) =>
+  setDoc(doc(db, 'deletedStaff', uid), {
+    uid,
+    email:     (email || '').toLowerCase(),
+    name:      name || '',
+    role:      role || 'staff',
+    deletedAt: new Date().toISOString(),
+  });
+
+const findDeletedStaffAccount = async (email) => {
+  const q = query(
+    collection(db, 'deletedStaff'),
+    where('email', '==', (email || '').toLowerCase()),
+    limit(1),
+  );
+  const snap = await getDocs(q);
+  return snap.empty ? null : { id: snap.docs[0].id, ...snap.docs[0].data() };
+};
+
 // Call this from StaffManagement to create a staff account
 // CEO stays logged in — secondary app is completely isolated
 export const createStaffAccount = async ({ name, email, role, subjects }) => {
+  if (!email?.trim().toLowerCase().endsWith(`@${ALLOWED_EMAIL_DOMAIN}`)) {
+    throw new Error(`Staff accounts must use a @${ALLOWED_EMAIL_DOMAIN} email address.`);
+  }
+  const cleanEmail = email.trim().toLowerCase();
+
   // Generate a secure temporary password
   const tempPassword = generatePassword();
 
@@ -37,43 +95,38 @@ export const createStaffAccount = async ({ name, email, role, subjects }) => {
 
     // Create Auth account using secondary instance — CEO NOT affected
     const credential = await createUserWithEmailAndPassword(
-      secondaryAuth, email, tempPassword
+      secondaryAuth, cleanEmail, tempPassword
     );
     const uid = credential.user.uid;
 
     // Sign out from secondary instance immediately
     await signOut(secondaryAuth);
 
-    // Save complete staff profile to Firestore with UID as document ID
-    await setDoc(doc(db, 'staff', uid), {
-      uid,
-      name,
-      email,
-      role,
-      subjects:       subjects || [],
-      active:         true,
-      needsAuthSetup: false, // no Firebase Console needed!
-      createdAt:      new Date().toISOString(),
-    });
-
-    // Authorization source of truth — rules check /roles/{uid}, not the
-    // staff profile (which the user could otherwise self-edit).
-    await setDoc(doc(db, 'roles', uid), { role, active: true });
-
-    // Safe directory mirror for staff-facing pickers (no fcmToken).
-    await setDoc(doc(db, 'staffDirectory', uid), {
-      name, email, role, subjects: subjects || [], active: true,
-    });
+    await writeStaffDocs({ uid, name, email: cleanEmail, role, subjects });
 
     // Send password reset email — staff clicks link and sets own password
     const mainAuth = getAuth(getApp());
-    await sendPasswordResetEmail(mainAuth, email);
+    await sendPasswordResetEmail(mainAuth, cleanEmail);
 
     return { success: true, uid, tempPassword };
   } catch (err) {
-    // Handle common errors with clear messages
     if (err.code === 'auth/email-already-in-use') {
-      throw new Error('This email is already registered. Use a different email.');
+      // The Auth account survives staff deletion. If a tombstone matches
+      // this email, adopt the old uid and rebuild the Firestore docs —
+      // this is the "delete then re-add" path.
+      const orphan = await findDeletedStaffAccount(cleanEmail).catch(() => null);
+      if (orphan?.uid) {
+        await writeStaffDocs({ uid: orphan.uid, name, email: cleanEmail, role, subjects });
+        await deleteDoc(doc(db, 'deletedStaff', orphan.id)).catch(() => {});
+        const mainAuth = getAuth(getApp());
+        await sendPasswordResetEmail(mainAuth, cleanEmail);
+        return { success: true, uid: orphan.uid, restored: true };
+      }
+      throw new Error(
+        'This email already has a login account. If they are a previously ' +
+        'deleted staff member, delete their user in Firebase Console → ' +
+        'Authentication first, or restore them from the Revoked list.'
+      );
     }
     if (err.code === 'auth/invalid-email') {
       throw new Error('Invalid email address format.');

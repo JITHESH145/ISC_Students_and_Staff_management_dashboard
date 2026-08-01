@@ -34,7 +34,7 @@ const TINTS = {
   '/notifications': 'var(--accent)',
 };
 
-export default function Sidebar({ navItems = [] }) {
+export default function Sidebar({ navItems = [], open = false, onClose = () => {} }) {
   const { logout, profile } = useAuth();
   const navigate = useNavigate();
 
@@ -46,7 +46,10 @@ export default function Sidebar({ navItems = [] }) {
   const initials = (profile?.name || 'U').split(' ').map(n => n[0]).slice(0,2).join('').toUpperCase();
 
   return (
-    <aside style={{
+    <>
+    {/* Mobile scrim — visible only when the drawer is open (CSS-gated) */}
+    {open && <div className="sidebar-overlay" onClick={onClose} />}
+    <aside className={`app-sidebar${open ? ' open' : ''}`} style={{
       width: 230,
       background: 'var(--surface)',
       borderRight: '1px solid var(--border)',
@@ -58,12 +61,12 @@ export default function Sidebar({ navItems = [] }) {
       {/* Logo */}
       <div style={{ padding: '18px 18px 16px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          {/* Company logo — drop your file at public/logo.png; falls back to the ISC badge */}
+          {/* Company logo — public/logo.png; falls back to the ISC badge */}
           <img src="/logo.png" alt="ISC" style={{ width: 36, height: 36, borderRadius: 10, objectFit: 'contain', flexShrink: 0 }}
             onError={e => { e.currentTarget.style.display = 'none'; e.currentTarget.nextSibling.style.display = 'flex'; }} />
           <div style={{
             width: 36, height: 36, borderRadius: 10, flexShrink: 0,
-            background: 'linear-gradient(140deg, #13B19E 0%, #0C7E72 100%)',
+            background: 'linear-gradient(140deg, #F4353C 0%, #C1121A 100%)',
             display: 'none', alignItems: 'center', justifyContent: 'center',
             color: '#fff', fontWeight: 800, fontSize: 13, fontFamily: 'var(--font-display)',
           }}>ISC</div>
@@ -95,6 +98,7 @@ export default function Sidebar({ navItems = [] }) {
               key={item.to}
               to={item.to}
               end={item.to === '/'}
+              onClick={onClose}
               style={({ isActive }) => ({
                 display: 'flex', alignItems: 'center', gap: 10,
                 padding: '8px 10px', fontSize: 13.5,
@@ -150,5 +154,6 @@ export default function Sidebar({ navItems = [] }) {
         </div>
       </div>
     </aside>
+    </>
   );
 }

@@ -242,8 +242,8 @@ select.form-input { appearance:none; cursor:pointer; background-image:url("data:
 .segmented button.active { background:var(--surface); color:var(--text); box-shadow:var(--shadow-xs); }
 .segmented button .seg-count { font-size:11px; opacity:.7; }
 
-/* Table */
-.table-container { border-radius:var(--radius-xl); border:1px solid var(--border); background:var(--surface); overflow:hidden; box-shadow:var(--shadow-sm); }
+/* Table — horizontal scroll instead of breaking the page on small screens */
+.table-container { border-radius:var(--radius-xl); border:1px solid var(--border); background:var(--surface); overflow:hidden; overflow-x:auto; box-shadow:var(--shadow-sm); -webkit-overflow-scrolling:touch; }
 table { width:100%; border-collapse:collapse; font-size:var(--fs-base); }
 thead tr { background:var(--n-50); border-bottom:1px solid var(--border); }
 th { padding:9px 14px; text-align:left; font-size:var(--fs-xs); font-weight:600; color:var(--text-muted); letter-spacing:0.04em; white-space:nowrap; text-transform:uppercase; }
@@ -339,6 +339,55 @@ tbody tr:hover { background:var(--surface-hover); }
 .funnel-count { font-size: 13px; font-weight: 600; width: 36px; text-align: right; flex-shrink: 0; }
 
 /* Tabs */
-.tab-bar { display: flex; background: var(--n-100); border-radius: 10px; padding: 4px; gap: 2px; width: fit-content; }
-.tab { padding: 7px 18px; border-radius: 7px; font-size: 13px; font-weight: 500; cursor: pointer; color: var(--text-muted); transition: all 0.15s; }
+.tab-bar { display: flex; background: var(--n-100); border-radius: 10px; padding: 4px; gap: 2px; width: fit-content; max-width: 100%; overflow-x: auto; }
+.tab { padding: 7px 18px; border-radius: 7px; font-size: 13px; font-weight: 500; cursor: pointer; color: var(--text-muted); transition: all 0.15s; white-space: nowrap; }
 .tab.active { background: var(--surface); color: var(--text); box-shadow: var(--shadow-sm); }
+
+/* ── Responsive shell ─────────────────────────────────────────── */
+/* Desktop: hamburger and drawer plumbing are inert. */
+.menu-btn { display: none; }
+.sidebar-overlay { display: none; }
+
+@media (max-width: 1024px) {
+  .topbar-search { width: 220px !important; }
+}
+
+@media (max-width: 900px) {
+  .menu-btn { display: inline-flex; }
+  /* Sidebar becomes an off-canvas drawer (overrides its inline styles) */
+  .app-sidebar {
+    position: fixed !important;
+    left: 0; top: 0; bottom: 0;
+    z-index: 1100;
+    transform: translateX(-105%);
+    transition: transform .25s var(--ease-out);
+    box-shadow: 0 0 60px rgba(20,20,23,.28) !important;
+  }
+  .app-sidebar.open { transform: translateX(0); }
+  .sidebar-overlay {
+    display: block; position: fixed; inset: 0;
+    background: rgba(20,20,23,.45); z-index: 1090;
+    backdrop-filter: blur(2px);
+    animation: fadein .2s ease;
+  }
+  .topbar-search { display: none !important; }
+  .topbar-divider, .topbar-user-info, .topbar-crumb-section { display: none !important; }
+}
+
+@media (max-width: 768px) {
+  :root { --page-pad: 12px; }
+  /* Kanban columns stack vertically on phones */
+  .task-board { flex-direction: column; align-items: stretch !important; }
+  .page-header { margin-bottom: 16px; }
+  .page-header h2 { font-size: 19px; }
+  /* Tables keep their layout and scroll sideways inside the container */
+  .table-container table { min-width: 560px; }
+  .modal { max-width: 100% !important; max-height: 94vh; }
+  .modal-overlay { padding: 10px; }
+  .toast { left: 12px; right: 12px; bottom: 12px; min-width: 0; max-width: none; }
+  /* Comfortable touch targets */
+  .btn { min-height: 40px; }
+  .form-input { min-height: 42px; }
+}
+
+@keyframes fadein { from { opacity: 0; } to { opacity: 1; } }

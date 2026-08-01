@@ -200,6 +200,14 @@ service cloud.firestore {
       allow read, create, update, delete: if isCEO();
     }
 
+    // ── deletedStaff — CEO only ──────────────────────────────────
+    // Tombstones for permanently deleted staff. The browser cannot
+    // delete Firebase Auth accounts, so these map an orphaned Auth
+    // account (uid + email) back to a re-added staff member.
+    match /deletedStaff/{uid} {
+      allow read, create, update, delete: if isCEO();
+    }
+
     // ── default deny: anything not matched above is blocked ──────
     match /{document=**} {
       allow read, write: if false;

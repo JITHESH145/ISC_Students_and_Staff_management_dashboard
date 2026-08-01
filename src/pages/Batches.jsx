@@ -575,6 +575,15 @@ export default function Batches() {
           toEmail: s.email, fromName: profile?.name || 'ISC SMS',
           title: 'New Batch Assignment', type: 'batch_assignment', route: '/batches',
           body: `You have been assigned to batch ${createForm.name}${s.id === createForm.mentorId ? ' as mentor' : ''}`,
+          intro: `Hi ${s.name}, you have been assigned to a new batch on ISC SMS.`,
+          details: [
+            { label: 'Batch',       value: createForm.name },
+            { label: 'Course',      value: createForm.course },
+            { label: 'Your role',   value: s.id === createForm.mentorId ? 'Mentor' : 'Faculty' },
+            { label: 'Start date',  value: createForm.startDate },
+            { label: 'End date',    value: createForm.endDate },
+            { label: 'Assigned by', value: profile?.name },
+          ].filter(d => d.value),
         }).catch(() => {});
       }
     }
@@ -742,6 +751,14 @@ export default function Batches() {
             toEmail: staff.email, fromName: profile?.name || 'ISC SMS',
             title: 'New Batch Assignment', type: 'batch_assignment', route: '/batches',
             body: `You have been added to batch ${selectedBatch.name}`,
+            intro: `Hi ${staff.name}, you have been added to a batch on ISC SMS.`,
+            details: [
+              { label: 'Batch',       value: selectedBatch.name },
+              { label: 'Course',      value: selectedBatch.course },
+              { label: 'Start date',  value: selectedBatch.startDate },
+              { label: 'End date',    value: selectedBatch.endDate },
+              { label: 'Added by',    value: profile?.name },
+            ].filter(d => d.value),
           });
         }
       }
@@ -948,6 +965,17 @@ export default function Batches() {
         toEmail: faculty.email, fromName: profile?.name || 'ISC SMS',
         title: 'Class Scheduled', type: 'schedule', route: '/schedule',
         body: `You have been assigned to "${scheduleForm.title}" — ${when} (${selectedBatch.name})`,
+        intro: `Hi ${faculty.name}, a class has been scheduled for you on ISC SMS.`,
+        details: [
+          { label: 'Class',        value: scheduleForm.title },
+          { label: 'Batch',        value: selectedBatch.name },
+          { label: 'When',         value: when },
+          { label: 'Duration',     value: scheduleForm.duration ? `${scheduleForm.duration} minutes` : '' },
+          { label: 'Type',         value: scheduleForm.type },
+          { label: 'Meet link',    value: scheduleForm.meetLink },
+          { label: 'Notes',        value: scheduleForm.notes },
+          { label: 'Scheduled by', value: profile?.name },
+        ].filter(d => d.value),
       }).catch(()=>{});
     }
     setToast({ message:'Schedule added!', type:'success' });
@@ -972,6 +1000,15 @@ export default function Batches() {
           toEmail: staff.email, fromName: profile?.name || 'ISC SMS',
           title: 'New Task Assigned', type: 'task_assigned', route: '/batches',
           body: `${profile?.name} assigned you "${taskForm.title}" in batch ${selectedBatch.name}${taskForm.dueDate ? ` (due ${taskForm.dueDate})` : ''}`,
+          intro: `Hi ${staff.name}, a new assignment has been created for you on ISC SMS.`,
+          details: [
+            { label: 'Assignment',  value: taskForm.title },
+            { label: 'Batch',       value: selectedBatch.name },
+            { label: 'Subject',     value: taskForm.subject },
+            { label: 'Description', value: taskForm.description },
+            { label: 'Due date',    value: taskForm.dueDate },
+            { label: 'Assigned by', value: profile?.name },
+          ].filter(d => d.value),
         }).catch(()=>{});
       }
     }
@@ -1262,7 +1299,7 @@ export default function Batches() {
         </div>
 
         {/* Batch info strip */}
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(5,1fr)', gap:10, marginBottom:16 }}>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))', gap:10, marginBottom:16 }}>
           {[
             { label:'Total Students',  value:count,                                                              color:'var(--blue-ink)',    bg:'var(--blue-soft)' },
             { label:'Active',          value:batchStudents.filter(s=>s.status==='active').length,                color:'var(--green-ink)',   bg:'var(--green-soft)' },

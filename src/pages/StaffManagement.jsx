@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { collection, getDocs, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase/config';
-import { createStaffAccount } from '../firebase/adminAuth';
+import { createStaffAccount, recordDeletedStaffAccount } from '../firebase/adminAuth';
 import { setRoleDoc, deleteRoleDoc, setDirectoryDoc, deleteDirectoryDoc } from '../firebase/services';
 import { Modal, Toast, Loading, Confirm, FormRow } from '../components/ui';
 import {
@@ -103,6 +103,16 @@ export default function StaffManagement() {
   const handlePermanentDelete = async () => {
     if (!deleting) return;
     try {
+      // Tombstone first: the Firebase Auth account can't be deleted from
+      // the browser, so remember its uid/email. Re-adding this email
+      // later adopts the same Auth account instead of erroring with
+      // "user already exists".
+      await recordDeletedStaffAccount({
+        uid:   deleting.id,
+        email: deleting.email,
+        name:  deleting.name,
+        role:  deleting.role,
+      }).catch(() => {});
       await deleteDoc(doc(db, 'staff', deleting.id));
       await deleteRoleDoc(deleting.id).catch(() => {});
       await deleteDirectoryDoc(deleting.id).catch(() => {});
@@ -148,7 +158,7 @@ export default function StaffManagement() {
 
       {/* KPI stat tiles */}
       {staffList.length > 0 && (
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:12, marginBottom:20 }}>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))', gap:12, marginBottom:20 }}>
           {[
             { label:'Total Staff', value: staffList.length, color:'var(--brand)' },
             { label:'Active', value: active.length, color:'var(--green)' },
@@ -164,7 +174,7 @@ export default function StaffManagement() {
       )}
 
       {/* Role explanation cards */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:12, marginBottom:20 }}>
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(220px,1fr))', gap:12, marginBottom:20 }}>
         {Object.entries(ROLE_INFO).map(([key, info]) => (
           <div key={key} style={{
             padding:'14px 16px', borderRadius:10,
@@ -512,7 +522,8 @@ export default function StaffManagement() {
             <p style={{ marginBottom:16, fontSize:14, lineHeight:1.6 }}>
               Permanently delete <strong>{deleting.name}</strong>?
               This removes the staff profile for good and cannot be undone.
-              (Their login account in Firebase Auth is not affected.)
+              (You can add them back later with the same email — their
+              login account will be reactivated automatically.)
             </p>
             <div style={{ display:'flex', gap:10, justifyContent:'flex-end' }}>
               <button className="btn btn-ghost" onClick={() => setDeleting(null)}>Cancel</button>

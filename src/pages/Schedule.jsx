@@ -303,9 +303,23 @@ export default function Schedule() {
   const notifyFacultyOfSchedule = (slot, title, body) => {
     const email = slot.facultyEmail || staffList.find(s => s.name === slot.facultyName)?.email;
     if (!email) return;
+    const when = slot.recurring
+      ? `Every ${slot.day} at ${slot.time}`
+      : [slot.scheduledDate, slot.time].filter(Boolean).join(' at ');
     notifyStaff({
       toEmail: email, fromName: profile?.name || 'ISC SMS',
       title, body, type: 'schedule', route: '/schedule',
+      intro: `Hi ${slot.facultyName || ''}, there is an update to your schedule on ISC SMS.`.replace('Hi ,', 'Hi,'),
+      details: [
+        { label: 'Class',      value: slot.title },
+        { label: 'Batch',      value: slot.batchName || batchName(slot.batchId) },
+        { label: 'When',       value: when },
+        { label: 'Duration',   value: slot.duration ? `${slot.duration} minutes` : '' },
+        { label: 'Type',       value: slot.type },
+        { label: 'Meet link',  value: slot.meetLink },
+        { label: 'Notes',      value: slot.notes },
+        { label: 'Updated by', value: profile?.name },
+      ].filter(d => d.value),
     }).catch(() => {});
   };
 
@@ -340,6 +354,17 @@ export default function Schedule() {
           toEmail: faculty.email, fromName: profile?.name || 'ISC SMS',
           title: 'Class Scheduled', type: 'schedule', route: '/schedule',
           body: `You have been assigned to "${form.title}" — ${when} (${batchName(targetBatch)})`,
+          intro: `Hi ${faculty.name}, a class has been scheduled for you on ISC SMS.`,
+          details: [
+            { label: 'Class',        value: form.title },
+            { label: 'Batch',        value: batchName(targetBatch) },
+            { label: 'When',         value: when },
+            { label: 'Duration',     value: form.duration ? `${form.duration} minutes` : '' },
+            { label: 'Type',         value: form.type },
+            { label: 'Meet link',    value: form.meetLink },
+            { label: 'Notes',        value: form.notes },
+            { label: 'Scheduled by', value: profile?.name },
+          ].filter(d => d.value),
         }).catch(()=>{});
       }
       setToast({ message: 'Added to schedule!', type: 'success' });
@@ -741,9 +766,10 @@ export default function Schedule() {
             );
           })()}
 
-          {/* Month view */}
+          {/* Month view — scrolls sideways on phones instead of crushing cells */}
           {view === 'month' && (
-            <div>
+            <div style={{ overflowX:'auto', WebkitOverflowScrolling:'touch' }}>
+            <div style={{ minWidth:560 }}>
               <div style={{ display:'grid', gridTemplateColumns:'repeat(7,1fr)', gap:1, marginBottom:4 }}>
                 {['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d => (
                   <div key={d} style={{ textAlign:'center', fontSize:11, fontWeight:700, color:'var(--muted)', padding:'6px 0' }}>{d}</div>
@@ -762,6 +788,7 @@ export default function Schedule() {
                   );
                 })}
               </div>
+            </div>
             </div>
           )}
 

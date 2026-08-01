@@ -436,7 +436,7 @@ export default function StaffDashboard() {
       )}
 
       {/* KPI Strip */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 14, marginBottom: 24 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(170px,1fr))', gap: 14, marginBottom: 24 }}>
         {statCards.map(card => {
           const Icon = card.icon;
           return (

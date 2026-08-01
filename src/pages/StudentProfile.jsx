@@ -509,7 +509,7 @@ export default function StudentProfile() {
           </div>
 
           {/* Progress summary */}
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:10, marginBottom:20 }}>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))', gap:10, marginBottom:20 }}>
             {[
               { label:'Completed',  value:flowDone,          color:'#10B981', bg:'#D1FAE5' },
               { label:'Pending',    value:flowTotal-flowDone, color:'#F59E0B', bg:'#FEF3C7' },
