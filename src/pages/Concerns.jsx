@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react';
 import {
   getConcerns, addConcern, updateConcern,
-  getStudents, getStaffProfiles, addNotification
+  getStudents, getStaffProfiles, notifyStaff
 } from '../firebase/services';
-import { sendConcernEmail } from '../firebase/emailService';
 import { Modal, Toast, Loading, FormRow } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { Plus, Search, Mail } from 'lucide-react';
@@ -88,24 +87,22 @@ export default function Concerns() {
         raisedByEmail:   user?.email || '',
       });
 
-      // Send in-app notification if assigned to a staff
+      // In-app notification + structured email together
       if (assignedStaff?.email) {
-        await addNotification({
+        await notifyStaff({
           toEmail:  assignedStaff.email,
-          toName:   assignedStaff.name,
           fromName: profile?.name,
           type:     'concern',
-          message:  `Concern raised for student "${stu?.name}" — ${form.type}: ${form.description.slice(0, 80)}`,
-        });
-
-        // Send email notification
-        await sendConcernEmail({
-          toEmail:     assignedStaff.email,
-          toName:      assignedStaff.name,
-          studentName: stu?.name || '',
-          concernType: form.type,
-          description: form.description,
-          assignedBy:  profile?.name,
+          title:    'Concern Assigned to You',
+          body:     `Concern raised for student "${stu?.name}" — ${form.type}: ${form.description.slice(0, 80)}`,
+          route:    '/concerns',
+          intro:    `Hi ${assignedStaff.name}, a student concern has been assigned to you on ISC SMS.`,
+          details: [
+            { label: 'Student',     value: stu?.name },
+            { label: 'Concern',     value: form.type },
+            { label: 'Description', value: form.description },
+            { label: 'Raised by',   value: `${profile?.name || 'ISC SMS'}${user?.email ? ` (${user.email})` : ''}` },
+          ].filter(d => d.value),
         });
       }
 

@@ -123,9 +123,10 @@ export const createStaffAccount = async ({ name, email, role, subjects }) => {
         return { success: true, uid: orphan.uid, restored: true };
       }
       throw new Error(
-        'This email already has a login account. If they are a previously ' +
-        'deleted staff member, delete their user in Firebase Console → ' +
-        'Authentication first, or restore them from the Revoked list.'
+        'This email already has a login account from before. Ask the staff ' +
+        'member to sign in to the app once with this email (their account ' +
+        're-registers itself), then click Add again — it will reactivate ' +
+        'their old account automatically.'
       );
     }
     if (err.code === 'auth/invalid-email') {

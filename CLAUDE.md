@@ -12,7 +12,7 @@ Internal **Student Management System** for **International Skills Club (ISC)** �
 - **UI:** inline styles + CSS design tokens in `src/index.css`; icons via `lucide-react`; charts via `recharts`; dates via `date-fns`; fonts Bricolage Grotesque + Hanken Grotesk (Google Fonts)
 - **Email:** EmailJS was **removed** — client-side email is disabled (see Gotchas)
 - **Tooling:** ESLint 10 (flat config), `firebase-tools` (emulators/deploy), `@firebase/rules-unit-testing`
-- **Hosting:** Firebase Hosting (`dist/`) and/or Vercel
+- **Hosting:** Vercel (live: `isc-students-and-staff-management-d-mu.vercel.app`; `vercel.json` holds the SPA fallback rewrite + security headers) and/or Firebase Hosting (`dist/`)
 
 > Note: `README.md` / `TECHNICAL_DOCUMENT.md` say "React 18" — `package.json` is the source of truth (React 19).
 
@@ -67,7 +67,7 @@ isc-sms/
 - **Assessments:** create for all/specific students, enter marks (CSV or manual) → `assessments` + `assessmentResults`; joined per-student for the profile Performance view.
 - **Tasks:** CEO assigns staff to-dos; staff complete their own with a required note. Staff may only update `status/completionNote/completedBy/completedAt`.
 - **Follow-ups / Concerns / Reports / Leads:** assignee/author-scoped records; Leads are **CEO-only**.
-- **Staff Management:** `createStaffAccount` (adminAuth.js) makes the Auth user via an isolated secondary app so the CEO isn't logged out, writes `staff/`, `roles/`, and `staffDirectory/` docs, and emails a password-reset link. **Delete → re-add:** permanent delete writes a tombstone to `deletedStaff/{uid}` (the browser can't delete Auth accounts); re-adding the same email adopts the orphaned Auth uid from the tombstone and rebuilds the docs instead of failing with `email-already-in-use`.
+- **Staff Management:** `createStaffAccount` (adminAuth.js) makes the Auth user via an isolated secondary app so the CEO isn't logged out, writes `staff/`, `roles/`, and `staffDirectory/` docs, and emails a password-reset link. **Delete → re-add:** permanent delete writes a tombstone to `deletedStaff/{uid}` (the browser can't delete Auth accounts); re-adding the same email adopts the orphaned Auth uid from the tombstone and rebuilds the docs instead of failing with `email-already-in-use`. Legacy orphans (deleted before tombstones existed) self-register their tombstone when they sign in (`AuthContext` writes it when `staff/{uid}` is missing; rules allow writing your own `deletedStaff/{uid}` with token-proven uid+email).
 - **Notifications:** in-app via Firestore `notifications` (real-time `onSnapshot` in `NotifContext`) + optional FCM web push (needs VAPID key).
 - **Trash & Requests:** soft-delete/restore of students & batches (CEO-only); staff removal/other requests reviewed by CEO.
 

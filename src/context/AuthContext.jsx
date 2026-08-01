@@ -5,7 +5,7 @@ import {
   onAuthStateChanged,
   sendPasswordResetEmail
 } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase/config';
 
 const AuthContext = createContext(null);
@@ -35,10 +35,24 @@ export function AuthProvider({ children }) {
       }
       setUser(firebaseUser);
       if (firebaseUser) {
-        const snap = await getDoc(doc(db, 'staff', firebaseUser.uid));
-        setProfile(snap.exists()
-          ? { uid: firebaseUser.uid, ...snap.data() }
-          : { uid: firebaseUser.uid, role: 'staff', name: firebaseUser.email });
+        const snap = await getDoc(doc(db, 'staff', firebaseUser.uid)).catch(() => null);
+        if (snap?.exists()) {
+          setProfile({ uid: firebaseUser.uid, ...snap.data() });
+        } else {
+          // Orphaned Auth account: profile docs were deleted (e.g. staff
+          // removed before tombstones existed) but the login survives.
+          // Self-register a deletedStaff tombstone so the CEO can re-add
+          // this email from Staff Management without the Firebase console.
+          setDoc(doc(db, 'deletedStaff', firebaseUser.uid), {
+            uid:            firebaseUser.uid,
+            email:          (firebaseUser.email || '').toLowerCase(),
+            name:           firebaseUser.displayName || firebaseUser.email || '',
+            role:           'staff',
+            deletedAt:      new Date().toISOString(),
+            selfRegistered: true,
+          }, { merge: true }).catch(() => {});
+          setProfile({ uid: firebaseUser.uid, role: 'staff', name: firebaseUser.email });
+        }
       } else {
         setProfile(null);
       }

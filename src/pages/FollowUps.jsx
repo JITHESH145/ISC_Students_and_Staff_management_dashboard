@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getAllFollowUps, getStudents, addFollowUp, completeFollowUp, addNotification, getStaffProfiles } from '../firebase/services';
-import { sendFollowUpEmail } from '../firebase/emailService';
+import { getAllFollowUps, getStudents, addFollowUp, completeFollowUp, notifyStaff, getStaffProfiles } from '../firebase/services';
 import { Modal, Toast, Loading, Avatar, FormRow } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { Plus, Search, Mail, CheckCircle, Clock } from 'lucide-react';
@@ -72,23 +71,22 @@ export default function FollowUps() {
         assignedByEmail: user?.email,
       });
 
-      // In-app notification bell
-      await addNotification({
+      // In-app notification + structured email together
+      await notifyStaff({
         toEmail:  selectedStaff.email,
-        toName:   selectedStaff.name,
         fromName: profile?.name,
         type:     'followup',
-        message:  `Follow-up assigned: "${form.studentName}" — ${form.note.slice(0, 60)}`,
-      });
-
-      // Email to staff's registered email — no manual entry needed
-      await sendFollowUpEmail({
-        toEmail:     selectedStaff.email,
-        toName:      selectedStaff.name,
-        studentName: form.studentName,
-        note:        form.note,
-        priority:    form.priority,
-        assignedBy:  profile?.name,
+        title:    'New Follow-Up Assigned',
+        body:     `Follow-up assigned: "${form.studentName}" — ${form.note.slice(0, 60)}`,
+        route:    '/followups',
+        intro:    `Hi ${selectedStaff.name}, a student follow-up has been assigned to you on ISC SMS.`,
+        details: [
+          { label: 'Student',     value: form.studentName },
+          { label: 'Note',        value: form.note },
+          { label: 'Next action', value: form.nextAction },
+          { label: 'Priority',    value: form.priority },
+          { label: 'Assigned by', value: `${profile?.name || 'ISC SMS'}${user?.email ? ` (${user.email})` : ''}` },
+        ].filter(d => d.value),
       });
 
       setToast({ message: `Follow-up assigned to ${selectedStaff.name}!`, type: 'success' });
