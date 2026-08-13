@@ -30,34 +30,44 @@
 //     Firebase console → Project settings → Service accounts →
 //     "Generate new private key". Paste the whole JSON as the value.
 // ─────────────────────────────────────────────────────────────────
-import { initializeApp, getApps, cert } from 'firebase-admin/app';
-import { getAuth } from 'firebase-admin/auth';
-import { getFirestore } from 'firebase-admin/firestore';
-
 const ALLOWED_EMAIL_DOMAIN = 'internationalskillsclub.com';
 
 function getServiceAccount() {
   const raw = process.env.FIREBASE_SERVICE_ACCOUNT || '';
   if (!raw) return null;
-  try {
-    // Accept either raw JSON or a base64-encoded blob (Vercel-friendly).
-    const text = raw.trim().startsWith('{')
-      ? raw
-      : Buffer.from(raw, 'base64').toString('utf8');
-    return JSON.parse(text);
-  } catch {
-    return null;
+  // Accept either raw JSON or a base64-encoded blob (Vercel-friendly).
+  const text = raw.trim().startsWith('{')
+    ? raw
+    : Buffer.from(raw, 'base64').toString('utf8');
+  const sa = JSON.parse(text);
+  // Pasted JSON keeps the private key's newlines as literal "\n"; some
+  // paste paths double-escape them. Normalise so cert() accepts the key.
+  if (sa.private_key && sa.private_key.includes('\\n')) {
+    sa.private_key = sa.private_key.replace(/\\n/g, '\n');
   }
+  return sa;
 }
 
-// Init the Admin app once per warm instance. Returns false when no
-// service account is configured (feature flag off).
-function ensureAdmin() {
-  if (getApps().length) return true;
-  const sa = getServiceAccount();
-  if (!sa) return false;
-  initializeApp({ credential: cert(sa) });
-  return true;
+// Dynamically load + init the Admin SDK inside a try/catch so a bundling
+// failure or a malformed service account returns a readable JSON status
+// instead of crashing the whole function (FUNCTION_INVOCATION_FAILED).
+// Returns { auth, firestore } on success, or { error } / { disabled }.
+let _cached = null;
+async function loadAdmin() {
+  if (_cached) return _cached;
+  const sa = (() => { try { return getServiceAccount(); } catch (e) { return { __parseError: String(e.message || e) }; } })();
+  if (!sa) return { disabled: true };
+  if (sa.__parseError) return { error: `service-account parse failed: ${sa.__parseError}` };
+  try {
+    const { initializeApp, getApps, cert } = await import('firebase-admin/app');
+    const { getAuth } = await import('firebase-admin/auth');
+    const { getFirestore } = await import('firebase-admin/firestore');
+    if (!getApps().length) initializeApp({ credential: cert(sa) });
+    _cached = { auth: getAuth(), firestore: getFirestore() };
+    return _cached;
+  } catch (e) {
+    return { error: `admin init failed: ${String(e.message || e)}` };
+  }
 }
 
 const isCompanyEmail = (s) =>
@@ -71,9 +81,13 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(204).end();
   if (req.method !== 'POST') return res.status(405).json({ status: 'method-not-allowed' });
 
-  // Feature flag: no service account → do nothing, succeed quietly so the
-  // client's fallback path is never blocked.
-  if (!ensureAdmin()) return res.status(200).json({ status: 'disabled' });
+  // Load Admin SDK. Feature flag: no service account → 'disabled' so the
+  // client's fallback path is never blocked. Init error → 200 disabled too
+  // (so re-adds still fall back gracefully) but with a diagnostic string.
+  const admin = await loadAdmin();
+  if (admin.disabled) return res.status(200).json({ status: 'disabled' });
+  if (admin.error)    return res.status(200).json({ status: 'disabled', reason: admin.error });
+  const { auth, firestore } = admin;
 
   // ── Authn: valid Firebase ID token ──
   const authz = req.headers.authorization || '';
@@ -82,14 +96,14 @@ export default async function handler(req, res) {
 
   let caller;
   try {
-    caller = await getAuth().verifyIdToken(token);
+    caller = await auth.verifyIdToken(token);
   } catch {
     return res.status(401).json({ status: 'invalid-token' });
   }
 
   // ── Authz: caller must be an active CEO (roles/{uid}) ──
   try {
-    const snap = await getFirestore().doc(`roles/${caller.uid}`).get();
+    const snap = await firestore.doc(`roles/${caller.uid}`).get();
     const role = snap.exists ? snap.data() : null;
     if (!role || role.active !== true || role.role !== 'ceo') {
       return res.status(403).json({ status: 'forbidden' });
@@ -112,7 +126,7 @@ export default async function handler(req, res) {
     if (action === 'resolve') {
       if (!email) return res.status(400).json({ status: 'bad-request' });
       try {
-        const user = await getAuth().getUserByEmail(email);
+        const user = await auth.getUserByEmail(email);
         return res.status(200).json({ status: 'ok', uid: user.uid });
       } catch (e) {
         if (e.code === 'auth/user-not-found') return res.status(200).json({ status: 'not-found' });
@@ -124,7 +138,7 @@ export default async function handler(req, res) {
       let uid = uidIn;
       if (!uid && email) {
         try {
-          uid = (await getAuth().getUserByEmail(email)).uid;
+          uid = (await auth.getUserByEmail(email)).uid;
         } catch (e) {
           if (e.code === 'auth/user-not-found') return res.status(200).json({ status: 'already-gone' });
           throw e;
@@ -134,7 +148,7 @@ export default async function handler(req, res) {
       // Never let a CEO delete their own login through this endpoint.
       if (uid === caller.uid) return res.status(400).json({ status: 'self-delete-forbidden' });
       try {
-        await getAuth().deleteUser(uid);
+        await auth.deleteUser(uid);
       } catch (e) {
         if (e.code === 'auth/user-not-found') return res.status(200).json({ status: 'already-gone' });
         throw e;
