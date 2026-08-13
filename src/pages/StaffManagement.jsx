@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { collection, getDocs, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase/config';
-import { createStaffAccount, recordDeletedStaffAccount } from '../firebase/adminAuth';
+import { createStaffAccount, recordDeletedStaffAccount, deleteStaffAuthAccount, resendStaffSetupEmail } from '../firebase/adminAuth';
 import { setRoleDoc, deleteRoleDoc, setDirectoryDoc, deleteDirectoryDoc } from '../firebase/services';
 import { Modal, Toast, Loading, Confirm, FormRow } from '../components/ui';
 import {
@@ -43,6 +43,9 @@ export default function StaffManagement() {
   const [saving, setSaving]           = useState(false);
   const [editingSubjects, setEditingSubjects] = useState([]);
   const [form, setForm] = useState({ name:'', email:'', role:'staff' });
+  // Resend-setup-email cooldown: one active email at a time, counts down secs.
+  const [resend, setResend] = useState(null); // { email, secs }
+  const resendTimer = useRef(null);
 
   const load = async () => {
     const snap = await getDocs(collection(db, 'staff'));
@@ -67,9 +70,13 @@ export default function StaffManagement() {
       setShowModal(false);
       setShowSuccess({
         name:  form.name,
-        email: form.email,
+        email: (result?.email || form.email || '').trim().toLowerCase() || form.email,
         role:  form.role,
+        restored: !!result?.restored,
       });
+      // The setup email just went out — arm the resend cooldown so the CEO
+      // waits a moment before re-sending.
+      startResendCooldown((form.email || '').trim().toLowerCase(), 30);
       setForm({ name:'', email:'', role:'staff' });
       load();
     } catch (err) {
@@ -103,26 +110,69 @@ export default function StaffManagement() {
   const handlePermanentDelete = async () => {
     if (!deleting) return;
     try {
-      // Tombstone first: the Firebase Auth account can't be deleted from
-      // the browser, so remember its uid/email. Re-adding this email
-      // later adopts the same Auth account instead of erroring with
-      // "user already exists".
+      // Tombstone first: a safety net in case the Auth account can't be
+      // deleted server-side (service account not configured). It records
+      // the uid/email so a later re-add can still adopt the account.
       await recordDeletedStaffAccount({
         uid:   deleting.id,
         email: deleting.email,
         name:  deleting.name,
         role:  deleting.role,
       }).catch(() => {});
+
+      // Remove the Firestore half (profile, authorization, directory).
       await deleteDoc(doc(db, 'staff', deleting.id));
       await deleteRoleDoc(deleting.id).catch(() => {});
       await deleteDirectoryDoc(deleting.id).catch(() => {});
-      setToast({ message: `${deleting.name} permanently deleted.`, type:'success' });
+
+      // Remove the Auth half too (server-side, Admin SDK). This is what
+      // prevents the "email already exists" orphan on re-add. Best-effort:
+      // 'disabled' means no service account is set — the tombstone covers us.
+      const authRes = await deleteStaffAuthAccount({ uid: deleting.id, email: deleting.email });
+      const authRemoved = authRes?.status === 'ok' || authRes?.status === 'already-gone';
+      if (authRemoved) {
+        // Login fully gone → the tombstone is no longer needed.
+        await deleteDoc(doc(db, 'deletedStaff', deleting.id)).catch(() => {});
+      }
+
+      setToast({
+        message: authRemoved
+          ? `${deleting.name} permanently deleted (login removed).`
+          : `${deleting.name} removed. Their login is retained — re-adding the same email will reactivate it.`,
+        type: 'success',
+      });
     } catch (err) {
       setToast({ message: 'Error: ' + err.message, type:'error' });
     }
     setDeleting(null);
     load();
   };
+
+  // ── Resend the password-setup / login link ─────────────────
+  const startResendCooldown = (email, secs = 30) => {
+    if (resendTimer.current) clearInterval(resendTimer.current);
+    setResend({ email, secs });
+    resendTimer.current = setInterval(() => {
+      setResend(prev => {
+        if (!prev || prev.secs <= 1) { clearInterval(resendTimer.current); return null; }
+        return { ...prev, secs: prev.secs - 1 };
+      });
+    }, 1000);
+  };
+  useEffect(() => () => { if (resendTimer.current) clearInterval(resendTimer.current); }, []);
+
+  const handleResend = async (email) => {
+    if (!email) return;
+    if (resend?.email === email && resend.secs > 0) return; // on cooldown
+    try {
+      await resendStaffSetupEmail(email);
+      setToast({ message: `Setup email re-sent to ${email}.`, type:'success' });
+      startResendCooldown(email, 30);
+    } catch (err) {
+      setToast({ message: 'Could not resend: ' + err.message, type:'error' });
+    }
+  };
+  const resendSecsFor = (email) => (resend?.email === email ? resend.secs : 0);
 
   // ── Subject assignment ─────────────────────────────────────
   const handleSaveSubjects = async () => {
@@ -290,7 +340,16 @@ export default function StaffManagement() {
                     </span>
                   </td>
                   <td>
-                    <div style={{ display:'flex', gap:6 }}>
+                    <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        title="Re-send the password-setup / login link"
+                        disabled={resendSecsFor(member.email) > 0}
+                        style={{ padding:'5px 10px', fontSize:12 }}
+                        onClick={() => handleResend(member.email)}>
+                        <Mail size={13}/>
+                        {resendSecsFor(member.email) > 0 ? `${resendSecsFor(member.email)}s` : 'Resend link'}
+                      </button>
                       {member.role !== 'ceo' && (
                         <button
                           className="btn btn-sm"
@@ -434,18 +493,38 @@ export default function StaffManagement() {
                 </span>
               </div>
               <div style={{ fontSize:13, color:'#374151', lineHeight:1.8 }}>
-                Login account created in Firebase<br/>
+                {showSuccess.restored
+                  ? <>Existing login <strong>reactivated</strong> for this email<br/></>
+                  : <>Login account created<br/></>}
                 Profile saved with <strong>{showSuccess.role}</strong> role<br/>
-                Password setup email sent to <strong>{showSuccess.email}</strong><br/>
-                <br/>
-                <strong>What happens next:</strong><br/>
-                The staff member opens their email clicks "Reset Password"                 sets their own password logs in to the app with their email.
+                Password setup email sent to <strong>{showSuccess.email}</strong>
                 <br/><br/>
-                <strong>If they don't receive the email:</strong><br/>
-                Ask them to check spam folder. Or go to Staff Management and
-                you can resend from Firebase Console Authentication their account Reset password.
+                <strong>What happens next:</strong><br/>
+                The staff member opens the email, clicks <strong>“Reset Password”</strong>,
+                sets their own password, and logs in with their email.
               </div>
             </div>
+
+            {/* Resend setup email — with cooldown */}
+            <div style={{
+              display:'flex', alignItems:'center', justifyContent:'space-between',
+              gap:10, padding:'10px 14px', background:'var(--surface-sunken)',
+              borderRadius:10, fontSize:12.5, color:'var(--text-sub)'
+            }}>
+              <span>Didn’t arrive? Check spam, or resend the setup link.</span>
+              <button
+                className="btn btn-secondary btn-sm"
+                disabled={resendSecsFor(showSuccess.email) > 0}
+                onClick={() => handleResend(showSuccess.email)}
+                style={{ whiteSpace:'nowrap' }}
+              >
+                <Mail size={13}/>
+                {resendSecsFor(showSuccess.email) > 0
+                  ? `Resend in ${resendSecsFor(showSuccess.email)}s`
+                  : 'Resend email'}
+              </button>
+            </div>
+
             <button className="btn btn-primary" onClick={() => setShowSuccess(null)}>
               Done
             </button>

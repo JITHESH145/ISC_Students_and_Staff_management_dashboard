@@ -1,5 +1,44 @@
 # `api/` — serverless functions (Vercel)
 
+## `staff-admin.js` — privileged staff-account admin (Admin SDK)
+
+Solves the "email already has a login account" error on re-adding a
+deleted staff member. Firebase keeps a person's **login** (Auth account)
+and their **app data** (Firestore docs) in two separate stores; the
+browser can create an Auth account but cannot look up or delete anyone
+else's by email. So removing a staff member leaves the Auth account
+orphaned, and re-adding the same email fails.
+
+This function uses the Firebase **Admin SDK** (a service account) to:
+- `action: 'resolve'` — return the existing Auth uid for an email, so a
+  re-add adopts it and rebuilds the Firestore docs (heals any orphan,
+  however it was deleted — app or Firebase console).
+- `action: 'delete'` — actually delete the Auth account on permanent
+  delete, so no orphan is ever created again.
+
+Both are CEO-only (the caller's ID token is verified and their
+`roles/{uid}` must be an active CEO). Admin Auth operations are **free on
+the Spark plan** — no Blaze upgrade needed.
+
+### Setup (required to fully activate the permanent fix)
+1. Firebase console → **Project settings → Service accounts →
+   Generate new private key**. A JSON file downloads. **Keep it secret —
+   never commit it.**
+2. Vercel → Project → **Settings → Environment Variables**, add:
+
+   | Variable | Value |
+   |---|---|
+   | `FIREBASE_SERVICE_ACCOUNT` | the entire service-account JSON (paste as-is, or base64-encode it) |
+
+3. Redeploy. Until this is set the function returns `{ status: 'disabled' }`
+   and the app falls back to its tombstone path (re-adds still work when the
+   deletion went through the app's Delete button; console deletions need the
+   sign-in-once recovery).
+
+---
+
+
+
 ## `send-email.js` — notification email sender
 
 Sends notification emails on Vercel's **free** Hobby tier. No Firebase
