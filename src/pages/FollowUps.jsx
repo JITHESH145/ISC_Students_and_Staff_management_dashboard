@@ -234,7 +234,7 @@ export default function FollowUps() {
 
       {/* Assign Modal */}
       {showModal && (
-        <Modal title="Assign Follow-Up" onClose={() => setShowModal(false)}>
+        <Modal title="Assign Follow-Up" onClose={() => setShowModal(false)} persistent>
           <form onSubmit={handleAdd} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div style={{ padding: '8px 12px', background: '#F0FDF4', borderRadius: 8, fontSize: 12, color: '#065F46' }}>
               Select a student and staff member — email is auto-fetched from their account.
@@ -296,7 +296,7 @@ export default function FollowUps() {
 
       {/* Complete Modal */}
       {completing && (
-        <Modal title="Log & Complete Follow-Up" onClose={() => setCompleting(null)}>
+        <Modal title="Log & Complete Follow-Up" onClose={() => setCompleting(null)} persistent>
           <div style={{ padding: '10px 14px', background: 'var(--bg)', borderRadius: 8, marginBottom: 14 }}>
             <div style={{ fontWeight: 500 }}>{completing.studentName}</div>
             <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>{completing.note}</div>

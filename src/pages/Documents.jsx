@@ -239,7 +239,7 @@ export default function Documents() {
       </div>
 
       {showModal && (
-        <Modal title="Upload Document" onClose={() => setShowModal(false)}>
+        <Modal title="Upload Document" onClose={() => setShowModal(false)} persistent>
           <form onSubmit={handleUpload} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div className="form-group">
               <label className="form-label">Student *</label>

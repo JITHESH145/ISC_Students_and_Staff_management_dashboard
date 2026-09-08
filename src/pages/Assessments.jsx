@@ -583,7 +583,7 @@ export default function Assessments({ filterBatchId = null }) {
 
       {/* ── Create Assessment Modal ── */}
       {showCreate && (
-        <Modal title="Create Assessment" onClose={() => setShowCreate(false)} wide>
+        <Modal title="Create Assessment" onClose={() => setShowCreate(false)} wide persistent>
           <form onSubmit={handleCreate} style={{ display:'flex', flexDirection:'column', gap:14 }}>
             <div className="form-group">
               <label className="form-label">Title *</label>
@@ -712,7 +712,7 @@ export default function Assessments({ filterBatchId = null }) {
 
       {/* ── Import Marks Modal ── */}
       {showImport && (
-        <Modal title={`Import Marks — ${showImport.title}`} onClose={() => setShowImport(null)} wide>
+        <Modal title={`Import Marks — ${showImport.title}`} onClose={() => setShowImport(null)} wide persistent>
           {/* Step indicator */}
           <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:20 }}>
             {[1,2,3].map(n => (
@@ -937,7 +937,7 @@ export default function Assessments({ filterBatchId = null }) {
 
       {/* ── Staff Removal Request Modal ── */}
       {removalTarget && (
-        <Modal title="Request Removal from Assessment" onClose={() => { setRemovalTarget(null); setRemovalReason(''); }}>
+        <Modal title="Request Removal from Assessment" onClose={() => { setRemovalTarget(null); setRemovalReason(''); }} persistent>
           <p style={{ fontSize:14, color:'#374151', marginBottom:12 }}>
             Request to be removed from conducting <strong>"{removalTarget.assessment.title}"</strong>.
           </p>

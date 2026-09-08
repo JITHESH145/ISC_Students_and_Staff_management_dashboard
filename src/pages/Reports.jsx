@@ -232,7 +232,7 @@ export default function Reports() {
 
       {/* Submit modal */}
       {showModal && (
-        <Modal title="Submit Today's Report" onClose={() => { setShowModal(false); setForm(blankForm()); }}>
+        <Modal title="Submit Today's Report" onClose={() => { setShowModal(false); setForm(blankForm()); }} persistent>
           <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             {/* Staff name — auto-filled, read-only */}
             <div className="form-group">

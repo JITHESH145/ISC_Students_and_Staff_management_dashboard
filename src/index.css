@@ -299,10 +299,15 @@ tbody tr:hover { background:var(--surface-hover); }
 .grid-3 { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; }
 .grid-4 { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; }
 
+/* Form grids — two columns on desktop, one on phones */
+.form-row  { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.form-grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+
 @media (max-width: 768px) {
   .grid-4 { grid-template-columns: 1fr 1fr; }
   .grid-3 { grid-template-columns: 1fr; }
   .grid-2 { grid-template-columns: 1fr; }
+  .form-row, .form-grid-2 { grid-template-columns: 1fr; }
 }
 
 /* Spinner */

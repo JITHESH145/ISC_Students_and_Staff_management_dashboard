@@ -294,7 +294,7 @@ export default function Leads() {
 
       {/* Modal: Add Lead */}
       {showModal && (
-        <Modal title="Add New Lead" onClose={() => setShowModal(false)}>
+        <Modal title="Add New Lead" onClose={() => setShowModal(false)} persistent>
           <form onSubmit={handleAdd} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div className="form-group">
               <label className="form-label">Full Name *</label>

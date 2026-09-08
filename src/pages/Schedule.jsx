@@ -1127,7 +1127,7 @@ export default function Schedule() {
 
       {/* ── Add Modal ── */}
       {showAdd && (
-        <Modal title="Add to Schedule" onClose={() => { setShowAdd(false); setForm(blankForm()); setStudentSearch(''); }} wide>
+        <Modal title="Add to Schedule" onClose={() => { setShowAdd(false); setForm(blankForm()); setStudentSearch(''); }} wide persistent>
           <form onSubmit={handleAdd} style={{ display:'flex', flexDirection:'column', gap:14 }}>
             {selectedBatch === ALL && (
               <div className="form-group">
@@ -1246,7 +1246,7 @@ export default function Schedule() {
 
       {/* ── Attendance Marking Modal ── */}
       {attSession && (
-        <Modal title={`Attendance — ${attSession.title}`} onClose={() => setAttSession(null)} wide>
+        <Modal title={`Attendance — ${attSession.title}`} onClose={() => setAttSession(null)} wide persistent>
           {attLoading ? <Loading/> : (
             <>
               <div style={{ fontSize:12, color:'var(--muted)', marginBottom:12 }}>{attSession.batchName || batchName(attSession.batchId)} · {attSession.scheduledDate || attSession.day} {attSession.time && `· ${attSession.time}`}</div>
@@ -1286,7 +1286,7 @@ export default function Schedule() {
 
       {/* ── Progress Reports Modal ── */}
       {reportSession && (
-        <Modal title={`Progress Reports — ${reportSession.title}`} onClose={() => setReportSession(null)} wide>
+        <Modal title={`Progress Reports — ${reportSession.title}`} onClose={() => setReportSession(null)} wide persistent>
           {reportModalLoading ? <Loading/> : (
             <>
               <div style={{ fontSize:12, color:'var(--muted)', marginBottom:6 }}>{reportSession.batchName || batchName(reportSession.batchId)} · {reportSession.scheduledDate || reportSession.day} {reportSession.time && `· ${reportSession.time}`}</div>
@@ -1367,7 +1367,7 @@ export default function Schedule() {
 
       {/* ── Reschedule modal ── */}
       {reschedule && (
-        <Modal title={`Reschedule — ${reschedule.slot.title}`} onClose={() => setReschedule(null)}>
+        <Modal title={`Reschedule — ${reschedule.slot.title}`} onClose={() => setReschedule(null)} persistent>
           <div style={{ fontSize:12.5, color:'var(--text-sub)', marginBottom:14 }}>Pick the new date and time for this class.</div>
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
             <div className="form-group"><label className="form-label">New Date *</label>

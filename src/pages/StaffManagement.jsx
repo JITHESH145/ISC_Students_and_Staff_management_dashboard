@@ -414,7 +414,7 @@ export default function StaffManagement() {
 
       {/* ── ADD STAFF MODAL ── */}
       {showModal && (
-        <Modal title="Add New Staff Member" onClose={() => setShowModal(false)}>
+        <Modal title="Add New Staff Member" onClose={() => setShowModal(false)} persistent>
           <form onSubmit={handleAdd} style={{ display:'flex', flexDirection:'column', gap:14 }}>
             <div style={{
               padding:'10px 14px', background:'#EFF6FF',
@@ -537,6 +537,7 @@ export default function StaffManagement() {
         <Modal
           title={`Assign Subjects — ${showSubjectModal.name}`}
           onClose={() => setShowSubjectModal(null)}
+          persistent
         >
           <div style={{ fontSize:13, color:'#6B7280', marginBottom:14 }}>
             Select all subjects this staff member handles.

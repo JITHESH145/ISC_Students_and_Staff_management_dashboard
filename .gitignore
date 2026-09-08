@@ -25,3 +25,9 @@ npm-debug.log*
 # Firebase
 .firebase/
 firebase-debug.log
+firestore-debug.log
+ui-debug.log
+# Local emulator data snapshot — may contain a copy of REAL production data
+emulator-data/
+# Service-account key used to seed the emulator — never commit
+serviceAccount*.json

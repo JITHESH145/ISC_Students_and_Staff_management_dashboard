@@ -242,7 +242,7 @@ export default function Concerns() {
 
       {/* Log Concern Modal */}
       {showModal && (
-        <Modal title="Log Student Concern" onClose={() => setShowModal(false)}>
+        <Modal title="Log Student Concern" onClose={() => setShowModal(false)} persistent>
           <form onSubmit={handleAdd} style={{ display:'flex', flexDirection:'column', gap:14 }}>
             <div style={{ padding:'8px 12px', background:'var(--blue-soft)', borderRadius:8, fontSize:12, color:'var(--blue-ink)', display:'flex', gap:6 }}>
               <Mail size={13} style={{ flexShrink:0, marginTop:1 }} />

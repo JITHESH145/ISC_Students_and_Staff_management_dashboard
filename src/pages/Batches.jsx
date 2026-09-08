@@ -20,10 +20,18 @@ import { sendAssignmentEmail } from '../firebase/emailService';
 import {
   Plus, Upload, UserPlus, ChevronRight, ArrowLeft,
   Download, CheckSquare, Users, Trash2, Settings,
-  AlertTriangle, CheckCircle, X, Search, Pencil, Clock
+  AlertTriangle, CheckCircle, X, Search, Pencil, Clock,
+  ChevronUp, ChevronDown
 } from 'lucide-react';
 
-const COURSES = ['Python','Data Science','Web Development','Machine Learning','Digital Marketing','UI/UX Design','Cyber Security','ISC Level 1','ISC Level 2','AI Batch','Other'];
+// Course dropdown: only "ISC Level 1" is a fixed option. Any other course is
+// typed once via "Other" and then persists automatically, because it's saved on
+// the batch and re-derived from existing batches next time (see courseOptions).
+const BASE_COURSES = ['ISC Level 1'];
+// Legacy hardcoded courses that were removed from the picker — filtered out so
+// they don't reappear even if an old batch still uses one.
+const LEGACY_COURSES = ['Python','Data Science','Web Development','Machine Learning','Digital Marketing','UI/UX Design','Cyber Security','ISC Level 2','AI Batch','Other'];
+const OTHER_COURSE = '__other__';
 const DAYS    = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
 const PHASES  = ['onboarding', 'course'];
 
@@ -54,6 +62,20 @@ const DEFAULT_COURSE_FLOW = [
 // Phone number, Whatsapp Number, Occupation, Kids Name(name), Gender, Age, Class, School Name
 // Columns shown in the students table by default (when a field has no explicit showInList)
 const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
+// End date = start date + N months. Clamps month-end overflow (e.g. Jan 31 + 1
+// month lands on the last day of Feb, not spilling into March).
+const addMonthsToDate = (startStr, months) => {
+  const n = Number(months);
+  if (!startStr || !n || Number.isNaN(n)) return '';
+  const d = new Date(startStr);
+  if (Number.isNaN(d.getTime())) return '';
+  const day = d.getDate();
+  d.setDate(1);
+  d.setMonth(d.getMonth() + n);
+  const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  d.setDate(Math.min(day, lastDay));
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+};
 const DEFAULT_LIST_KEYS = ['fatherName','motherName','phone','whatsappNumber','classStd','varkResult','syllabus'];
 
 const DEFAULT_STUDENT_FIELDS = [
@@ -453,7 +475,7 @@ export default function Batches() {
 
   // Batch create form
   const [createForm, setCreateForm] = useState({
-    name:'', course:'', mentorId:'', mentorName:'', faculties:[], startDate:'', endDate:'',
+    name:'', course:'', courseIsOther:false, mentorId:'', mentorName:'', faculties:[], startDate:'', endDate:'',
     status:'upcoming', maxSeats:'', courseDurationMonths:'',
     courseFlow: DEFAULT_COURSE_FLOW,
     studentFields: DEFAULT_STUDENT_FIELDS,
@@ -553,7 +575,10 @@ export default function Batches() {
 
   // ── CRUD handlers ─────────────────────────────────────────────
   const handleCreateBatch = async (e) => {
-    e.preventDefault(); setSaving(true);
+    e.preventDefault();
+    // Course may be typed via "Other"; require a non-empty value either way.
+    if (!createForm.course.trim()) { setToast({ message:'Please choose or type a course.', type:'error' }); return; }
+    setSaving(true);
     // The faculty chips only stored names in createForm.faculties, so the batch
     // was saved with empty staffIds/staffDetails — meaning no staff were actually
     // assigned (rules + staff dashboards key off staffIds). Resolve the selected
@@ -563,7 +588,10 @@ export default function Batches() {
     // staffIds drives access + "my batches"; include the mentor so they are
     // covered even without the separate mentorId query.
     const staffIds = [...new Set([...facultyStaff.map(s => s.id), createForm.mentorId].filter(Boolean))];
-    await addBatch({ ...createForm, staffIds, staffDetails });
+    // courseIsOther is a UI-only flag — don't persist it on the batch doc.
+    const batchData = { ...createForm, course: createForm.course.trim() };
+    delete batchData.courseIsOther;
+    await addBatch({ ...batchData, staffIds, staffDetails });
     // Notify every faculty + mentor assigned at creation (in-app + email).
     // This path previously assigned staff silently — no notification fired.
     const mentorStaff = createForm.mentorId ? staffList.find(s => s.id === createForm.mentorId) : null;
@@ -589,7 +617,7 @@ export default function Batches() {
     }
     setToast({ message:`Batch "${createForm.name}" created!`, type:'success' });
     setShowCreate(false);
-    setCreateForm({ name:'', course:'', mentorId:'', mentorName:'', faculties:[], startDate:'', endDate:'', status:'upcoming', maxSeats:'', courseDurationMonths:'', courseFlow:DEFAULT_COURSE_FLOW, studentFields:DEFAULT_STUDENT_FIELDS, subjects:[], staffIds:[], staffDetails:[] });
+    setCreateForm({ name:'', course:'', courseIsOther:false, mentorId:'', mentorName:'', faculties:[], startDate:'', endDate:'', status:'upcoming', maxSeats:'', courseDurationMonths:'', courseFlow:DEFAULT_COURSE_FLOW, studentFields:DEFAULT_STUDENT_FIELDS, subjects:[], staffIds:[], staffDetails:[] });
     await loadBatches(); setSaving(false);
   };
 
@@ -654,10 +682,41 @@ export default function Batches() {
     setShowFlowConfig(false); setToast({ message:'Course flow updated!', type:'success' }); setSaving(false);
   };
 
+  // Reorder a field row without touching its label/key. Reordering is a
+  // first-class action so users never rename labels to rearrange columns —
+  // doing that would desync a field's display label from its permanent `key`
+  // (the key is what actually stores/reads the value: s[f.key]).
+  const moveEditField = (idx, dir) => {
+    const j = idx + dir;
+    if (j < 0 || j >= editFields.length) return;
+    const u = [...editFields];
+    [u[idx], u[j]] = [u[j], u[idx]];
+    setEditFields(u);
+  };
+
+  // Removing a field only drops the column from the config — it never deletes
+  // the values already saved on student docs (those stay under the field's key
+  // and remain viewable on each student's profile). Confirm so it's deliberate.
+  const removeEditField = (idx) => {
+    const f = editFields[idx];
+    if (f.key === 'name') { setToast({ message:'The Kids Name field is required and cannot be removed.', type:'error' }); return; }
+    if (!window.confirm(`Remove the "${f.label}" field?\n\nThe column disappears from the table and add-student form, but any data already captured for existing students is kept and stays visible on each student's profile under "Additional Details".`)) return;
+    setEditFields(editFields.filter((_,i) => i !== idx));
+  };
+
   const handleSaveFieldConfig = async () => {
     setSaving(true);
-    const cleanFields = editFields.map(f => f.options
-      ? { ...f, options: f.options.map(o => o.trim()).filter(Boolean) } : f);
+    // Guard the invariant every reader depends on: each field has a stable,
+    // unique, non-empty key. Backfill any legacy field missing a key and
+    // de-dupe collisions so a value is never written to the wrong field.
+    const seen = new Set();
+    const cleanFields = editFields.map(f => {
+      let key = f.key && String(f.key).trim();
+      if (!key || seen.has(key)) key = generateKey(f.label || 'field');
+      seen.add(key);
+      const next = { ...f, key };
+      return next.options ? { ...next, options: next.options.map(o => o.trim()).filter(Boolean) } : next;
+    });
     await updateBatch(selectedBatch.id, { studentFields:cleanFields });
     const updated = { ...selectedBatch, studentFields:cleanFields };
     setSelectedBatch(updated); setBatches(prev => prev.map(b => b.id===selectedBatch.id?updated:b));
@@ -2076,7 +2135,7 @@ export default function Batches() {
 
         {/* Create Assessment Modal */}
         {showCreateAssessment && (
-          <Modal title={`Add Assessment — ${selectedBatch.name}`} onClose={() => setShowCreateAssessment(false)} wide>
+          <Modal title={`Add Assessment — ${selectedBatch.name}`} onClose={() => setShowCreateAssessment(false)} wide persistent>
             <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
               <div className="form-group">
                 <label className="form-label">Assessment Title *</label>
@@ -2282,7 +2341,7 @@ export default function Batches() {
 
         {/* Add Staff Modal */}
         {showAddStaff && (
-          <Modal title={`Add Staff to ${selectedBatch.name}`} onClose={() => { setShowAddStaff(false); setSelectedStaffIds([]); setStaffSearch(''); }}>
+          <Modal title={`Add Staff to ${selectedBatch.name}`} onClose={() => { setShowAddStaff(false); setSelectedStaffIds([]); setStaffSearch(''); }} persistent>
             <input className="form-input" placeholder="Search staff..." style={{ marginBottom:12 }}
               value={staffSearch} onChange={e => setStaffSearch(e.target.value)} />
             <div style={{ maxHeight:280, overflowY:'auto', display:'flex', flexDirection:'column', gap:6, marginBottom:16 }}>
@@ -2310,7 +2369,7 @@ export default function Batches() {
 
         {/* Removal Request Modal */}
         {showRemovalModal && (
-          <Modal title="Request Removal" onClose={() => { setShowRemovalModal(null); setRemovalReason(''); }}>
+          <Modal title="Request Removal" onClose={() => { setShowRemovalModal(null); setRemovalReason(''); }} persistent>
             <p style={{ fontSize:14, color:'#374151', marginBottom:12 }}>
               Request removal from <strong>{showRemovalModal.targetName}</strong>. Reason:
             </p>
@@ -2327,9 +2386,9 @@ export default function Batches() {
 
         {/* Add Student */}
         {showAddStudent && (
-          <Modal title={`Add Student to ${selectedBatch.name}`} onClose={() => setShowAddStudent(false)} wide>
+          <Modal title={`Add Student to ${selectedBatch.name}`} onClose={() => setShowAddStudent(false)} wide persistent>
             <form onSubmit={handleAddStudent} style={{ display:'flex', flexDirection:'column', gap:12 }}>
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+              <div className="form-grid-2">
                 {batchFields.map(f => (
                   <div key={f.key} className="form-group">
                     <label className="form-label">{f.label}{f.required?' *':''}</label>
@@ -2394,7 +2453,7 @@ export default function Batches() {
 
         {/* Course Flow Config */}
         {showFlowConfig && (
-          <Modal title={`Configure Course Flow — ${selectedBatch.name}`} onClose={() => setShowFlowConfig(false)} wide>
+          <Modal title={`Configure Course Flow — ${selectedBatch.name}`} onClose={() => setShowFlowConfig(false)} wide persistent>
             <div style={{ display:'flex', flexDirection:'column', gap:10, marginBottom:16 }}>
               {editFlow.map((step, idx) => {
                 const upd = (patch) => { const u=[...editFlow]; u[idx]={...u[idx],...patch}; setEditFlow(u); };
@@ -2453,23 +2512,38 @@ export default function Batches() {
 
         {/* Student Fields Config */}
         {showFieldConfig && (
-          <Modal title={`Configure Student Fields — ${selectedBatch.name}`} onClose={() => setShowFieldConfig(false)} wide>
+          <Modal title={`Configure Student Fields — ${selectedBatch.name}`} onClose={() => setShowFieldConfig(false)} wide persistent>
             <div style={{ fontSize:12.5, color:'var(--text-sub)', marginBottom:12, background:'var(--brand-50)', padding:'8px 12px', borderRadius:8 }}>
               Tick <strong>Show in list</strong> to display that field as a column in the students table.
               The <strong>Kids Name</strong>, <strong>Status</strong>, <strong>Onboarding</strong> and <strong>View</strong> columns are always shown.
+              Use the <strong>↑ ↓</strong> arrows to reorder fields — always reorder this way, never by renaming labels
+              (each field's data is tied to its permanent <em>id</em>, not its label). Removing a field hides its column but
+              keeps data already saved for existing students, viewable on each student's profile.
             </div>
             <div style={{ display:'flex', flexDirection:'column', gap:8, marginBottom:16 }}>
               {editFields.map((field, idx) => (
-                <div key={idx} style={{ display:'flex', flexDirection:'column', gap:6, padding:'8px 12px', background:'#F9FAFB', borderRadius:8 }}>
+                <div key={field.key} style={{ display:'flex', flexDirection:'column', gap:6, padding:'8px 12px', background:'#F9FAFB', borderRadius:8 }}>
                   <div style={{ display:'flex', gap:8, alignItems:'center' }}>
-                    <input className="form-input" style={{ flex:2 }} placeholder="Label" value={field.label}
-                      onChange={e => { const u=[...editFields]; u[idx]={...u[idx],label:e.target.value}; setEditFields(u); }}/>
+                    <div style={{ display:'flex', flexDirection:'column' }}>
+                      <button className="btn btn-ghost btn-sm btn-icon" style={{ height:16, padding:0 }} disabled={idx===0}
+                        title="Move up" onClick={() => moveEditField(idx, -1)}><ChevronUp size={14}/></button>
+                      <button className="btn btn-ghost btn-sm btn-icon" style={{ height:16, padding:0 }} disabled={idx===editFields.length-1}
+                        title="Move down" onClick={() => moveEditField(idx, 1)}><ChevronDown size={14}/></button>
+                    </div>
+                    <div style={{ flex:2, display:'flex', flexDirection:'column', gap:2 }}>
+                      <input className="form-input" placeholder="Label" value={field.label}
+                        onChange={e => { const u=[...editFields]; u[idx]={...u[idx],label:e.target.value}; setEditFields(u); }}/>
+                      <span style={{ fontSize:10, color:'#9CA3AF', paddingLeft:2 }}>
+                        id: {field.key}{field.key==='name' ? ' · required student name' : ''}
+                      </span>
+                    </div>
                     <select className="form-input" style={{ flex:1 }} value={field.type||'text'}
                       onChange={e => { const u=[...editFields]; u[idx]={...u[idx],type:e.target.value}; setEditFields(u); }}>
                       {['text','email','tel','number','date','select'].map(t=><option key={t} value={t}>{t === 'select' ? 'select (dropdown)' : t}</option>)}
                     </select>
                     <label style={{ display:'flex', alignItems:'center', gap:4, fontSize:12, whiteSpace:'nowrap' }}>
-                      <input type="checkbox" checked={field.required||false}
+                      <input type="checkbox" checked={field.key==='name' ? true : (field.required||false)}
+                        disabled={field.key==='name'}
                         onChange={e => { const u=[...editFields]; u[idx]={...u[idx],required:e.target.checked}; setEditFields(u); }}/> Required
                     </label>
                     <label style={{ display:'flex', alignItems:'center', gap:4, fontSize:12, whiteSpace:'nowrap' }}>
@@ -2477,7 +2551,7 @@ export default function Batches() {
                         disabled={field.key==='name'}
                         onChange={e => { const u=[...editFields]; u[idx]={...u[idx],showInList:e.target.checked}; setEditFields(u); }}/> Show in list
                     </label>
-                    <button className="btn btn-ghost btn-sm" style={{ color:'#EF4444' }} onClick={() => setEditFields(editFields.filter((_,i)=>i!==idx))}><Trash2 size={13}/></button>
+                    <button className="btn btn-ghost btn-sm" style={{ color:'#EF4444' }} disabled={field.key==='name'} onClick={() => removeEditField(idx)}><Trash2 size={13}/></button>
                   </div>
                   {field.type === 'select' && (
                     <div style={{ paddingLeft:2 }}>
@@ -2503,18 +2577,20 @@ export default function Batches() {
 
         {/* Edit course duration (CEO controls active/expired via dates + status) */}
         {showDates && (
-          <Modal title={`Course Duration — ${selectedBatch.name}`} onClose={() => setShowDates(false)}>
+          <Modal title={`Course Duration — ${selectedBatch.name}`} onClose={() => setShowDates(false)} persistent>
             <div style={{ fontSize:12.5, color:'var(--text-sub)', marginBottom:14, background:'var(--brand-50)', padding:'8px 12px', borderRadius:8 }}>
               Set the course start &amp; end dates. A batch counts as <strong>Expired</strong> once its end date passes and its status isn't <strong>Active</strong>. Keep the status <strong>Active</strong> (top of the page) to keep adding students, tasks &amp; assessments even past the end date.
             </div>
             <FormRow>
               <div className="form-group"><label className="form-label">Start Date</label>
-                <input className="form-input" type="date" value={datesForm.startDate} onChange={e => setDatesForm(f => ({ ...f, startDate:e.target.value }))}/></div>
-              <div className="form-group"><label className="form-label">End Date</label>
-                <input className="form-input" type="date" value={datesForm.endDate} onChange={e => setDatesForm(f => ({ ...f, endDate:e.target.value }))}/></div>
+                <input className="form-input" type="date" value={datesForm.startDate} onChange={e => setDatesForm(f => ({ ...f, startDate:e.target.value, endDate: addMonthsToDate(e.target.value, f.courseDurationMonths) }))}/></div>
+              <div className="form-group"><label className="form-label">End Date <span style={{ fontWeight:400, color:'var(--text-muted)', fontSize:11 }}>(auto)</span></label>
+                <input className="form-input" type="date" value={datesForm.endDate} readOnly tabIndex={-1}
+                  style={{ background:'var(--surface-sunken)', cursor:'not-allowed' }}
+                  title="Calculated automatically from start date + duration"/></div>
             </FormRow>
             <div className="form-group"><label className="form-label">Course Duration (months)</label>
-              <input className="form-input" type="number" min="0" value={datesForm.courseDurationMonths} onChange={e => setDatesForm(f => ({ ...f, courseDurationMonths:e.target.value }))}/></div>
+              <input className="form-input" type="number" min="0" value={datesForm.courseDurationMonths} onChange={e => setDatesForm(f => ({ ...f, courseDurationMonths:e.target.value, endDate: addMonthsToDate(f.startDate, e.target.value) }))}/></div>
             <div style={{ display:'flex', gap:10, justifyContent:'flex-end', marginTop:8 }}>
               <button className="btn btn-ghost" onClick={() => setShowDates(false)}>Cancel</button>
               <button className="btn btn-primary" onClick={handleSaveDates} disabled={saving}>{saving?'Saving...':'Save Duration'}</button>
@@ -2524,7 +2600,7 @@ export default function Batches() {
 
         {/* Subject Config */}
         {showSubjectConfig && (
-          <Modal title={`Configure Subjects — ${selectedBatch.name}`} onClose={() => setShowSubjectConfig(false)} wide>
+          <Modal title={`Configure Subjects — ${selectedBatch.name}`} onClose={() => setShowSubjectConfig(false)} wide persistent>
             <div style={{ display:'flex', flexDirection:'column', gap:8, marginBottom:16 }}>
               {editSubjects.map((sub, idx) => (
                 <div key={idx} style={{ display:'flex', gap:8, alignItems:'center', padding:'8px 12px', background:'#F9FAFB', borderRadius:8 }}>
@@ -2552,7 +2628,7 @@ export default function Batches() {
 
         {/* Add Task / Assignment */}
         {showTask && (
-          <Modal title="Create Assignment / Task" onClose={() => setShowTask(false)}>
+          <Modal title="Create Assignment / Task" onClose={() => setShowTask(false)} persistent>
             <form onSubmit={handleAddTask} style={{ display:'flex', flexDirection:'column', gap:12 }}>
               <div className="form-group"><label className="form-label">Task Title *</label><input className="form-input" required placeholder="e.g. Complete Chapter 3 exercises" value={taskForm.title} onChange={e=>setTaskForm({...taskForm,title:e.target.value})}/></div>
               <FormRow>
@@ -2787,24 +2863,49 @@ export default function Batches() {
 
       {/* Create Batch Modal */}
       {showCreate && (
-        <Modal title="Create New Batch" onClose={() => setShowCreate(false)} wide>
+        <Modal title="Create New Batch" onClose={() => setShowCreate(false)} wide persistent>
           <form onSubmit={handleCreateBatch} style={{ display:'flex', flexDirection:'column', gap:14 }}>
             <div className="form-group"><label className="form-label">Batch Name *</label><input className="form-input" required placeholder="e.g. ISC Level 1 — June 2026" value={createForm.name} onChange={e=>setCreateForm({...createForm,name:e.target.value})}/></div>
             <FormRow>
               <div className="form-group">
                 <label className="form-label">Course *</label>
-                <select className="form-input" required value={createForm.course} onChange={e=>setCreateForm({...createForm,course:e.target.value})}>
-                  <option value="">Select</option>{COURSES.map(c=><option key={c}>{c}</option>)}
-                </select>
+                {(() => {
+                  // Options: ISC Level 1 + any custom course previously saved on a
+                  // batch (excludes the removed legacy courses) + "Other".
+                  const custom = [...new Set(batches.map(b => b.course).filter(Boolean))]
+                    .filter(c => !BASE_COURSES.includes(c) && !LEGACY_COURSES.includes(c));
+                  const options = [...BASE_COURSES, ...custom];
+                  return (
+                    <select className="form-input" value={createForm.courseIsOther ? OTHER_COURSE : createForm.course}
+                      onChange={e => {
+                        if (e.target.value === OTHER_COURSE) setCreateForm({ ...createForm, courseIsOther: true, course: '' });
+                        else setCreateForm({ ...createForm, courseIsOther: false, course: e.target.value });
+                      }}>
+                      <option value="">Select</option>
+                      {options.map(c => <option key={c} value={c}>{c}</option>)}
+                      <option value={OTHER_COURSE}>Other (type a new course)…</option>
+                    </select>
+                  );
+                })()}
+                {createForm.courseIsOther && (
+                  <input className="form-input" style={{ marginTop:8 }} autoFocus placeholder="e.g. ISC Level 3"
+                    value={createForm.course} onChange={e => setCreateForm({ ...createForm, course: e.target.value })}/>
+                )}
               </div>
               <div className="form-group">
                 <label className="form-label">Course Duration (months) *</label>
-                <input className="form-input" type="number" required placeholder="6" value={createForm.courseDurationMonths} onChange={e=>setCreateForm({...createForm,courseDurationMonths:e.target.value})}/>
+                <input className="form-input" type="number" min="0" required placeholder="6" value={createForm.courseDurationMonths}
+                  onChange={e => setCreateForm(f => ({ ...f, courseDurationMonths: e.target.value, endDate: addMonthsToDate(f.startDate, e.target.value) }))}/>
               </div>
             </FormRow>
             <FormRow>
-              <div className="form-group"><label className="form-label">Start Date</label><input className="form-input" type="date" value={createForm.startDate} onChange={e=>setCreateForm({...createForm,startDate:e.target.value})}/></div>
-              <div className="form-group"><label className="form-label">End Date</label><input className="form-input" type="date" value={createForm.endDate} onChange={e=>setCreateForm({...createForm,endDate:e.target.value})}/></div>
+              <div className="form-group"><label className="form-label">Start Date</label>
+                <input className="form-input" type="date" value={createForm.startDate}
+                  onChange={e => setCreateForm(f => ({ ...f, startDate: e.target.value, endDate: addMonthsToDate(e.target.value, f.courseDurationMonths) }))}/></div>
+              <div className="form-group"><label className="form-label">End Date <span style={{ fontWeight:400, color:'var(--text-muted)', fontSize:11 }}>(auto)</span></label>
+                <input className="form-input" type="date" value={createForm.endDate} readOnly tabIndex={-1}
+                  style={{ background:'var(--surface-sunken)', cursor:'not-allowed' }}
+                  title="Calculated automatically from start date + duration"/></div>
             </FormRow>
             <div className="form-group">
               <label className="form-label">Assign Mentor</label>

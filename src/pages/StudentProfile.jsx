@@ -44,6 +44,24 @@ const ALL_SUBJECTS = [
   'Economics', 'Accountancy', 'Business Studies', 'Other'
 ];
 
+// Keys already rendered in the curated contact grid above — skip these when
+// listing extra/archived fields so nothing is shown twice.
+const CURATED_PROFILE_KEYS = new Set([
+  'name','phone','parentName','parentPhone','email','classStd','location',
+  'staffAssigned','education','fatherName','motherName','schoolName',
+  'whatsappNumber','address','occupation','gender','age','varkResult','syllabus',
+]);
+// Structural / system keys on a student doc that are never student-entered fields.
+const SYSTEM_STUDENT_KEYS = new Set([
+  'id','batchId','batchName','course','courseDurationMonths','courseFlow',
+  'staffIds','status','createdAt','updatedAt','joinDate','joiningDate',
+  'weakSubjects','fcmToken','subscription',
+]);
+const isDisplayableValue = (v) =>
+  (typeof v === 'string' && v.trim() !== '') ||
+  (typeof v === 'number' && !Number.isNaN(v)) ||
+  typeof v === 'boolean';
+
 export default function StudentProfile() {
   const { id }       = useParams();
   const navigate     = useNavigate();
@@ -53,6 +71,7 @@ export default function StudentProfile() {
   const [student,     setStudent]     = useState(null);
   const [batches,     setBatches]     = useState([]);
   const [batchCourseFlow, setBatchCourseFlow] = useState([]);
+  const [batchFields, setBatchFields] = useState([]);
   const [followups,   setFollowups]   = useState([]);
   const [assessments, setAssessments] = useState([]);
   const [classReports, setClassReports] = useState([]);
@@ -123,6 +142,7 @@ export default function StudentProfile() {
       const batchDoc = b.find(batch => batch.id === s?.batchId);
       const flow = batchDoc?.courseFlow || DEFAULT_batchCourseFlow;
       setBatchCourseFlow(flow);
+      setBatchFields(batchDoc?.studentFields || []);
     } catch (err) {
       import.meta.env.DEV && console.error('StudentProfile load error:', err);
     } finally {
@@ -385,6 +405,54 @@ export default function StudentProfile() {
                   );
                 })}
               </div>
+
+              {/* Additional / custom / archived fields.
+                  Driven by the batch's live studentFields config (stable keys),
+                  so custom fields the CEO added show up here automatically, and
+                  reordering/renaming labels never mislabels a value. Any value
+                  still stored under a key that was later removed from the config
+                  is surfaced under "Archived" so historical data is never lost. */}
+              {(() => {
+                const configured = (batchFields || [])
+                  .filter(f => f.key !== 'name'
+                    && !CURATED_PROFILE_KEYS.has(f.key)
+                    && isDisplayableValue(student[f.key]))
+                  .map(f => ({ key: f.key, label: f.label || f.key, val: student[f.key], archived: false }));
+                const knownKeys = new Set([...(batchFields || []).map(f => f.key)]);
+                const archived = Object.keys(student)
+                  .filter(k => !knownKeys.has(k)
+                    && !CURATED_PROFILE_KEYS.has(k)
+                    && !SYSTEM_STUDENT_KEYS.has(k)
+                    && isDisplayableValue(student[k]))
+                  .map(k => ({ key: k, label: k, val: student[k], archived: true }));
+                const rows = [...configured, ...archived];
+                if (rows.length === 0) return null;
+                return (
+                  <div style={{ marginTop:14, paddingTop:14, borderTop:'1px solid #F0F0F0' }}>
+                    <div style={{ color:'#9CA3AF', fontSize:10, fontWeight:600, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:8 }}>
+                      Additional Details
+                    </div>
+                    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, fontSize:13 }}>
+                      {rows.map(row => (
+                        <div key={row.key}>
+                          <div style={{ color:'#9CA3AF', fontSize:10, fontWeight:600, textTransform:'uppercase', letterSpacing:'0.06em', marginBottom:3, display:'flex', alignItems:'center', gap:5 }}>
+                            {row.label}
+                            {row.archived && (
+                              <span title="This field was removed from the batch's student-field config; the saved value is kept."
+                                style={{ fontSize:8.5, fontWeight:700, color:'#92400E', background:'#FEF3C7', borderRadius:4, padding:'1px 4px', letterSpacing:0 }}>
+                                ARCHIVED
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ display:'flex', alignItems:'center', gap:5, color:'var(--text)' }}>
+                            <BookOpen size={12} style={{ color:'#9CA3AF' }}/> {typeof row.val === 'boolean' ? (row.val ? 'Yes' : 'No') : String(row.val)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Subscription */}
               {sub && (
@@ -905,7 +973,7 @@ export default function StudentProfile() {
 
       {/* Edit student */}
       {editModal && (
-        <Modal title="Edit Student Profile" onClose={() => setEditModal(false)} wide>
+        <Modal title="Edit Student Profile" onClose={() => setEditModal(false)} wide persistent>
           <form onSubmit={handleEdit} style={{ display:'flex', flexDirection:'column', gap:12 }}>
             <FormRow>
               <div className="form-group"><label className="form-label">Name</label><input className="form-input" value={editForm.name||''} onChange={e=>setEditForm({...editForm,name:e.target.value})}/></div>
@@ -970,7 +1038,7 @@ export default function StudentProfile() {
 
       {/* Add assessment */}
       {assessModal && (
-        <Modal title="Add Assessment Result" onClose={() => setAssessModal(false)}>
+        <Modal title="Add Assessment Result" onClose={() => setAssessModal(false)} persistent>
           <form onSubmit={handleAddAssessment} style={{ display:'flex', flexDirection:'column', gap:12 }}>
             <div className="form-group"><label className="form-label">Test Name *</label><input className="form-input" required value={assessForm.testName} onChange={e=>setAssessForm({...assessForm,testName:e.target.value})}/></div>
             <FormRow>
@@ -1017,7 +1085,7 @@ export default function StudentProfile() {
 
       {/* Weak subjects */}
       {weakModal && (
-        <Modal title="Manage Weak Subjects" onClose={() => setWeakModal(false)}>
+        <Modal title="Manage Weak Subjects" onClose={() => setWeakModal(false)} persistent>
           <div style={{ marginBottom:14, fontSize:13, color:'#6B7280' }}>
             Select subjects this student is struggling with. This helps faculty prioritise attention.
           </div>
@@ -1049,7 +1117,7 @@ export default function StudentProfile() {
         const opts = flowNoteModal.fieldOptions || [];
         const fieldLabel = flowNoteModal.fieldLabel || flowNoteModal.label;
         return (
-          <Modal title={`Mark Complete: ${flowNoteModal.label}`} onClose={() => { setFlowNoteModal(null); setFlowNote(''); setFlowValue(''); }}>
+          <Modal title={`Mark Complete: ${flowNoteModal.label}`} onClose={() => { setFlowNoteModal(null); setFlowNote(''); setFlowValue(''); }} persistent>
             {ft === 'dropdown' && (
               <div className="form-group" style={{ marginBottom:14 }}>
                 <label className="form-label">{fieldLabel} *</label>

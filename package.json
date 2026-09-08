@@ -5,9 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:emulator": "vite --mode emulator",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
+    "emulators": "firebase emulators:start --only auth,firestore,storage --project isc-sms-test",
+    "seed:emulator": "node scripts/seed-emulator.mjs",
     "test:rules": "firebase emulators:exec --only firestore --project demo-isc-rules-test \"node tests/rules.test.mjs\""
   },
   "dependencies": {

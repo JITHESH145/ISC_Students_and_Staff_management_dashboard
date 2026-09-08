@@ -238,7 +238,7 @@ export default function StudentsPage() {
 
       {/* Add Student Modal */}
       {showModal && (
-        <Modal title="Add New Student" onClose={() => setShowModal(false)} wide>
+        <Modal title="Add New Student" onClose={() => setShowModal(false)} wide persistent>
           <form onSubmit={handleAdd} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <FormRow>
               <div className="form-group"><label className="form-label">Full Name *</label><input className="form-input" required value={form.name} onChange={e => setForm({...form, name: e.target.value})} /></div>

@@ -445,7 +445,7 @@ export default function Tasks() {
 
       {/* Modal: Assign Task */}
       {showModal && (
-        <Modal title="Assign Task to Staff" onClose={() => setShowModal(false)}>
+        <Modal title="Assign Task to Staff" onClose={() => setShowModal(false)} persistent>
           <form onSubmit={handleAdd} style={{ display:'flex', flexDirection:'column', gap:14 }}>
             <div style={{ padding:'10px 12px', background:'var(--blue-soft)', borderRadius:8, fontSize:12, color:'var(--blue-ink)' }}>
               Staff email is pulled automatically from their account — you just select their name.
@@ -508,7 +508,7 @@ export default function Tasks() {
 
       {/* Complete with note modal */}
       {completing && (
-        <Modal title={`Complete — ${completing.title}`} onClose={() => setCompleting(null)}>
+        <Modal title={`Complete — ${completing.title}`} onClose={() => setCompleting(null)} persistent>
           <div style={{ fontSize:13, color:'var(--text-sub)', marginBottom:12, lineHeight:1.5 }}>
             Add a short note about what was done. This is visible to the person who assigned the task.
           </div>

@@ -2,18 +2,22 @@ import { useEffect, useRef } from 'react';
 import { X } from 'lucide-react';
 
 // ── Modal ──────────────────────────────────────────────────────
-export function Modal({ title, onClose, children, wide }) {
+// `persistent` — for data-entry forms: don't close on backdrop tap or Escape,
+// so a stray click (common on mobile) can't discard everything the user typed.
+// Only the X button, Cancel, or a successful submit closes it.
+export function Modal({ title, onClose, children, wide, persistent }) {
   const onCloseRef = useRef(onClose);
   useEffect(() => { onCloseRef.current = onClose; });
 
   useEffect(() => {
+    if (persistent) return;
     const handler = (e) => { if (e.key === 'Escape') onCloseRef.current(); };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, []); // stable — only mounts/unmounts with the modal
+  }, [persistent]); // stable — only mounts/unmounts with the modal
 
   return (
-    <div className="modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) onCloseRef.current(); }}>
+    <div className="modal-overlay" onClick={(e) => { if (!persistent && e.target === e.currentTarget) onCloseRef.current(); }}>
       <div className="modal" style={wide ? { maxWidth: 680 } : {}} onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <h3>{title}</h3>
@@ -98,7 +102,7 @@ export function Loading({ text = 'Loading...' }) {
 // ── Form Row helper ────────────────────────────────────────────
 export function FormRow({ children }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+    <div className="form-row">
       {children}
     </div>
   );
