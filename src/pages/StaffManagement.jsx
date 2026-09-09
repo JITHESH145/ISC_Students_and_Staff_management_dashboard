@@ -42,6 +42,8 @@ export default function StaffManagement() {
   const [showSubjectModal, setShowSubjectModal] = useState(null);
   const [revoking, setRevoking]       = useState(null);
   const [deleting, setDeleting]       = useState(null);
+  const [changeTier, setChangeTier]   = useState(null); // { member, tier }
+  const [changingTier, setChangingTier] = useState(false);
   const [toast, setToast]             = useState(null);
   const [saving, setSaving]           = useState(false);
   const [editingSubjects, setEditingSubjects] = useState([]);
@@ -190,6 +192,33 @@ export default function StaffManagement() {
     }[status] || `Unexpected status: ${status}`;
     setToast({ message: msg, type: status === 'sent' ? 'success' : status === 'disabled' ? 'info' : 'error' });
     setTestingEmail(false);
+  };
+
+  // Access tier of an existing member (drives the row dropdown).
+  const currentTier = (m) => (m.access === 'admin' ? 'admin' : (m.role || 'staff'));
+  // UI tier → { authRole, access }. Admin gets CEO-level authRole so all rules
+  // and permission checks pass, tagged access:'admin' for the UI treatment.
+  const TIER_MAP = {
+    staff: { authRole: 'staff', access: null },
+    admin: { authRole: 'ceo', access: 'admin' },
+    ceo:   { authRole: 'ceo', access: null },
+  };
+  const applyChangeTier = async () => {
+    if (!changeTier) return;
+    const { member, tier } = changeTier;
+    const { authRole, access } = TIER_MAP[tier];
+    setChangingTier(true);
+    try {
+      await updateDoc(doc(db, 'staff', member.id), { role: authRole, access });
+      await setRoleDoc(member.id, { role: authRole, active: member.active !== false });
+      await setDirectoryDoc(member.id, { name: member.name, email: member.email, role: authRole, access, subjects: member.subjects || [], active: member.active !== false });
+      setToast({ message: `${member.name} is now ${ROLE_INFO[tier].label}.`, type: 'success' });
+      setChangeTier(null);
+      load();
+    } catch (e) {
+      setToast({ message: 'Could not change access: ' + (e?.code || e?.message || 'error'), type: 'error' });
+    }
+    setChangingTier(false);
   };
 
   const handleResend = async (email) => {
@@ -344,7 +373,18 @@ export default function StaffManagement() {
                   </td>
                   <td style={{ color:'#6B7280', fontSize:13 }}>{member.email}</td>
                   <td>
-                    <span className={`badge ${ri.badgeCls}`}>{ri.label}</span>
+                    {member.id === profile?.uid ? (
+                      <span className={`badge ${ri.badgeCls}`}>{ri.label}</span>
+                    ) : (
+                      <select className="form-input" title="Change access tier"
+                        style={{ height: 30, fontSize: 12, padding: '0 6px', width: 'auto', fontWeight: 600, color: ri.color, borderColor: ri.color }}
+                        value={currentTier(member)}
+                        onChange={e => setChangeTier({ member, tier: e.target.value })}>
+                        <option value="staff">Staff</option>
+                        <option value="admin">Admin/Staff</option>
+                        <option value="ceo">CEO</option>
+                      </select>
+                    )}
                   </td>
                   <td>
                     <div style={{ display:'flex', flexWrap:'wrap', gap:4, alignItems:'center' }}>
@@ -387,7 +427,7 @@ export default function StaffManagement() {
                         <Mail size={13}/>
                         {resendSecsFor(member.email) > 0 ? `${resendSecsFor(member.email)}s` : 'Resend link'}
                       </button>
-                      {member.role !== 'ceo' && (
+                      {!(member.role === 'ceo' && member.access !== 'admin') && (
                         <button
                           className="btn btn-sm"
                           style={{
@@ -646,6 +686,21 @@ export default function StaffManagement() {
             <div style={{ display:'flex', gap:10, justifyContent:'flex-end' }}>
               <button className="btn btn-ghost" onClick={() => setDeleting(null)}>Cancel</button>
               <button className="btn btn-danger" onClick={handlePermanentDelete}>Delete Permanently</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {changeTier && (
+        <div className="modal-overlay">
+          <div className="modal" style={{ maxWidth:420 }}>
+            <p style={{ marginBottom:16, fontSize:14, lineHeight:1.6 }}>
+              Change <strong>{changeTier.member.name}</strong>'s access to <strong>{ROLE_INFO[changeTier.tier]?.label}</strong>?
+              <br/><span style={{ fontSize:12.5, color:'#6B7280' }}>{ROLE_INFO[changeTier.tier]?.desc}</span>
+            </p>
+            <div style={{ display:'flex', gap:10, justifyContent:'flex-end' }}>
+              <button className="btn btn-ghost" onClick={() => setChangeTier(null)}>Cancel</button>
+              <button className="btn btn-primary" onClick={applyChangeTier} disabled={changingTier}>{changingTier ? 'Saving…' : 'Change Access'}</button>
             </div>
           </div>
         </div>

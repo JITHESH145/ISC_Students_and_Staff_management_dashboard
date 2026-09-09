@@ -551,9 +551,10 @@ export const setRoleDoc = (uid, { role, active }) =>
 
 export const deleteRoleDoc = (uid) => deleteDoc(doc(db,'roles', uid));
 
-export const setDirectoryDoc = (uid, { name, role, subjects, active, email }) =>
+export const setDirectoryDoc = (uid, { name, role, subjects, active, email, access }) =>
   setDoc(doc(db,'staffDirectory', uid),
-    { name: name || '', role: role || 'staff', subjects: subjects || [], active: active !== false, email: email || '' },
+    { name: name || '', role: role || 'staff', subjects: subjects || [], active: active !== false, email: email || '',
+      ...(access !== undefined ? { access: access ?? null } : {}) },
     { merge: true });
 
 export const deleteDirectoryDoc = (uid) => deleteDoc(doc(db,'staffDirectory', uid));
