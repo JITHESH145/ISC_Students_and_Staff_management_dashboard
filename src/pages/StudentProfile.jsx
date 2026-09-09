@@ -433,7 +433,7 @@ export default function StudentProfile() {
                 </div>
               </div>
 
-              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, fontSize:13 }}>
+              <div className="mobile-1col" style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, fontSize:13 }}>
                 {[
                   { icon:Phone,    label:'Child Phone',  val:student.phone       },
                   { icon:User,     label:'Parent Name',  val:student.parentName  },

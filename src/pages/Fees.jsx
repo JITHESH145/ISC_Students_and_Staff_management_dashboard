@@ -215,7 +215,7 @@ export default function Fees() {
       </div>
 
       {/* Controls */}
-      <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+      <div className="mobile-stack" style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
         <select className="form-input" style={{ width: 'auto', minWidth: 200, height: 40 }} value={batchId} onChange={e => setBatchId(e.target.value)}>
           <option value="">Select a batch…</option>
           {batches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}

@@ -1050,7 +1050,7 @@ export default function Schedule() {
             </div>
 
             {/* Filters — search (student), date, batch, staff (both views) */}
-            <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:14, flexWrap:'wrap' }}>
+            <div className="mobile-stack" style={{ display:'flex', alignItems:'center', gap:10, marginBottom:14, flexWrap:'wrap' }}>
               {attView === 'student' && (
                 <div style={{ position:'relative', minWidth:200, flex:'1 1 220px', maxWidth:320 }}>
                   <Search size={15} style={{ position:'absolute', left:11, top:'50%', transform:'translateY(-50%)', color:'var(--muted)' }}/>

@@ -388,19 +388,35 @@ tbody tr:hover { background:var(--surface-hover); }
 }
 
 @media (max-width: 768px) {
-  :root { --page-pad: 12px; }
+  :root { --page-pad: 14px; --card-pad: 15px; }
+  /* Slightly larger base text so dense pages read comfortably on phones */
+  html, body, #root { font-size: 13.5px; }
   /* Kanban columns stack vertically on phones */
   .task-board { flex-direction: column; align-items: stretch !important; }
   .page-header { margin-bottom: 16px; }
   .page-header h2 { font-size: 19px; }
   /* Tables keep their layout and scroll sideways inside the container */
   .table-container table { min-width: 560px; }
+  th, td { padding: 11px 12px; }
   .modal { max-width: 100% !important; max-height: 94vh; }
   .modal-overlay { padding: 10px; }
   .toast { left: 12px; right: 12px; bottom: 12px; min-width: 0; max-width: none; }
   /* Comfortable touch targets */
   .btn { min-height: 40px; }
+  .btn-sm { min-height: 34px; }
   .form-input { min-height: 42px; }
+  .tab { padding: 8px 14px; }
+}
+
+/* On phones, toolbar rows tagged .mobile-stack lay their controls out full-width
+   in a clean vertical stack instead of cramped side-by-side wrapping. */
+@media (max-width: 640px) {
+  .mobile-stack { flex-direction: column !important; align-items: stretch !important; }
+  .mobile-stack > * { width: 100% !important; max-width: none !important; }
+  .mobile-stack .form-input,
+  .mobile-stack .btn { width: 100%; }
+  /* Collapse an inline multi-column grid to a single column on phones. */
+  .mobile-1col { grid-template-columns: 1fr !important; }
 }
 
 @keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
