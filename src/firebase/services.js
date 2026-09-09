@@ -778,3 +778,34 @@ export const getStaffBatches = async (uid) => {
     return [];
   }
 };
+
+// ── Fees / payments ────────────────────────────────────────────
+// One doc per student (doc id = studentId) holding a payments[] array and the
+// agreed totalFee. Financial data — CEO-managed (see firestore.rules `fees`).
+const feesRef = () => collection(db, 'fees');
+
+export const getFeesByBatch = async (batchId, scope = null) => {
+  if (scope && !isCeoScope(scope)) return [];
+  if (!batchId) return [];
+  try {
+    const snap = await getDocs(query(feesRef(), where('batchId', '==', batchId)));
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch {
+    return [];
+  }
+};
+
+export const getAllFees = async (scope = null) => {
+  if (scope && !isCeoScope(scope)) return [];
+  try {
+    const snap = await getDocs(feesRef());
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch {
+    return [];
+  }
+};
+
+// Upsert a student's fee record (doc id = studentId), merging fields. The page
+// passes the full recomputed `payments` array and `totalFee` on every change.
+export const saveFee = async (studentId, data) =>
+  setDoc(doc(db, 'fees', studentId), { ...data, studentId, updatedAt: serverTimestamp() }, { merge: true });

@@ -186,6 +186,11 @@ service cloud.firestore {
       allow read, create, update, delete: if isCEO();
     }
 
+    // ── fees — CEO only (student fee payments) ───────────────────
+    match /fees/{id} {
+      allow read, create, update, delete: if isCEO();
+    }
+
     // ── requests — own + CEO ─────────────────────────────────────
     match /requests/{id} {
       allow read: if isCEO()

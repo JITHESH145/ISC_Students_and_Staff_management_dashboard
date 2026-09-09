@@ -15,6 +15,7 @@ const BREADCRUMBS = {
   '/tasks':       ['Operations',  'Staff Tasks'],
   '/reports':     ['Operations',  'Daily Reports'],
   '/leads':       ['Operations',  'Lead Pipeline'],
+  '/fees':        ['Operations',  'Fees'],
   '/documents':   ['Operations',  'Documents'],
   '/schedule':    ['Operations',  'Schedule'],
   '/staff':       ['Management',  'Staff Management'],

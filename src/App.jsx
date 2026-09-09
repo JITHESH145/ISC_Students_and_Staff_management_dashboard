@@ -19,6 +19,7 @@ import Leaderboard     from './pages/Leaderboard';
 import Tasks           from './pages/Tasks';
 import Reports         from './pages/Reports';
 import Leads           from './pages/Leads';
+import Fees            from './pages/Fees';
 import Documents       from './pages/Documents';
 import StaffManagement from './pages/StaffManagement';
 import Trash           from './pages/Trash';
@@ -44,6 +45,7 @@ const NAV_BY_ROLE = {
     { to: '/tasks',       label: 'Staff Tasks',       icon: 'CheckSquare'    },
     { to: '/reports',     label: 'Daily Reports',     icon: 'FileText'       },
     { to: '/leads',       label: 'Lead Pipeline',     icon: 'TrendingUp'     },
+    { to: '/fees',        label: 'Fees',              icon: 'Wallet'         },
     { to: '/documents',   label: 'Documents',         icon: 'FolderOpen'     },
     { section: 'MANAGEMENT' },
     { to: '/staff',       label: 'Staff Management',  icon: 'UsersRound'     },
@@ -130,6 +132,7 @@ export default function App() {
             <Route path="/tasks"         element={<Tasks />}           />
             <Route path="/reports"       element={<Reports />}         />
             <Route path="/leads"         element={<Leads />}           />
+            <Route path="/fees"          element={<Fees />}            />
             <Route path="/documents"     element={<Documents />}       />
             <Route path="/staff"         element={<StaffManagement />} />
             <Route path="/trash"         element={<Trash />}           />
