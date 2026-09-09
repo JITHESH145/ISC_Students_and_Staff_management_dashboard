@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getBatches, getBatchStudents, getFeesByBatch, saveFee } from '../firebase/services';
+import { getBatches, getBatchStudents, getFeesByBatch, saveFee, updateBatch } from '../firebase/services';
 import { useAuth } from '../context/AuthContext';
 import { Modal, Toast, Loading, Confirm } from '../components/ui';
 import { Wallet, Plus, Search, Trash2, Edit2, CheckCircle, TrendingUp, AlertTriangle } from 'lucide-react';
@@ -15,8 +15,9 @@ const STATUS_META = {
   unpaid:  { c: 'var(--red-ink)',   bg: 'var(--neg-50)', label: 'Unpaid' },
 };
 
-const calcFee = (fee) => {
-  const total = Number(fee?.totalFee || 0);
+const calcFee = (fee, batchFee = 0) => {
+  // A student's total is their own override if set, otherwise the batch fee.
+  const total = fee?.totalFee ? Number(fee.totalFee) : Number(batchFee || 0);
   const paid = (fee?.payments || []).reduce((a, p) => a + Number(p.amount || 0), 0);
   const balance = total - paid;
   const pct = total > 0 ? Math.min(100, Math.round((paid / total) * 100)) : (paid > 0 ? 100 : 0);
@@ -48,6 +49,8 @@ export default function Fees() {
 
   const [batches, setBatches] = useState([]);
   const [batchId, setBatchId] = useState('');
+  const [batchFeeInput, setBatchFeeInput] = useState('');
+  const [savingBatchFee, setSavingBatchFee] = useState(false);
   const [rows, setRows] = useState([]);            // { student, fee }
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
@@ -90,11 +93,29 @@ export default function Fees() {
   };
   useEffect(() => { loadBatch(batchId); /* eslint-disable-next-line */ }, [batchId]);
 
-  const batchName = batches.find(b => b.id === batchId)?.name || '';
+  const batch = batches.find(b => b.id === batchId);
+  const batchName = batch?.name || '';
+  const batchFee = Number(batch?.courseFee || 0);
+  // Keep the batch-fee input in sync when the selected batch changes.
+  useEffect(() => { setBatchFeeInput(batch?.courseFee ? String(batch.courseFee) : ''); }, [batchId, batch?.courseFee]);
+
+  const saveBatchFee = async () => {
+    if (!batchId) return;
+    setSavingBatchFee(true);
+    const courseFee = Number(batchFeeInput || 0);
+    try {
+      await updateBatch(batchId, { courseFee });
+      setBatches(prev => prev.map(b => b.id === batchId ? { ...b, courseFee } : b));
+      setToast({ message: `Batch fee set to ${inr(courseFee)}. Students without a custom fee use this.`, type: 'success' });
+    } catch (e) {
+      setToast({ message: 'Could not save batch fee: ' + (e?.code || e?.message || 'error'), type: 'error' });
+    }
+    setSavingBatchFee(false);
+  };
 
   // KPIs across the whole batch
   const kpi = rows.reduce((a, { fee }) => {
-    const c = calcFee(fee);
+    const c = calcFee(fee, batchFee);
     a.expected += c.total; a.collected += c.paid;
     if (c.status === 'paid') a.paidCount++;
     if (c.overdue) a.overdue++;
@@ -104,7 +125,7 @@ export default function Fees() {
   const rate = kpi.expected > 0 ? Math.round((kpi.collected / kpi.expected) * 100) : 0;
 
   const filtered = rows.filter(({ student, fee }) => {
-    const { status } = calcFee(fee);
+    const { status } = calcFee(fee, batchFee);
     if (statusFilter && status !== statusFilter) return false;
     if (!search) return true;
     const q = search.toLowerCase();
@@ -114,7 +135,8 @@ export default function Fees() {
   // ── Fee editor ────────────────────────────────────────────────
   const openFee = ({ student, fee }) => {
     setFeeStudent(student);
-    setDraftTotal(fee.totalFee ? String(fee.totalFee) : '');
+    // Default a new student's total to the batch fee (editable per student).
+    setDraftTotal(fee.totalFee ? String(fee.totalFee) : (batchFee ? String(batchFee) : ''));
     setDraftDue(fee.dueDate || '');
     setDraftPayments([...(fee.payments || [])]);
     setPayForm({ amount: '', date: todayStr(), method: 'Cash', note: '' });
@@ -157,8 +179,12 @@ export default function Fees() {
       setToast({ message: 'Fee record saved.', type: 'success' });
       closeFee();
       await loadBatch(batchId);
-    } catch {
-      setToast({ message: 'Could not save the fee record.', type: 'error' });
+    } catch (e) {
+      const code = e?.code || e?.message || 'error';
+      const hint = String(code).includes('permission')
+        ? 'permission denied — the fees security rule is not deployed yet (run: firebase deploy --only firestore:rules).'
+        : code;
+      setToast({ message: 'Could not save: ' + hint, type: 'error' });
     }
     setSavingFee(false);
   };
@@ -194,6 +220,17 @@ export default function Fees() {
           <option value="">Select a batch…</option>
           {batches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
         </select>
+        {batchId && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 9, padding: '4px 6px 4px 12px' }}
+            title="Default fee for this batch — students without a custom fee inherit it">
+            <span style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 600, whiteSpace: 'nowrap' }}>Batch fee ₹</span>
+            <input className="form-input" type="number" min="0" placeholder="0" style={{ height: 32, width: 100, border: 'none', padding: '0 4px' }}
+              value={batchFeeInput} onChange={e => setBatchFeeInput(e.target.value)} />
+            <button className="btn btn-primary btn-sm" onClick={saveBatchFee} disabled={savingBatchFee || batchFeeInput === (batch?.courseFee ? String(batch.courseFee) : '')}>
+              {savingBatchFee ? '…' : 'Set'}
+            </button>
+          </div>
+        )}
         <div style={{ position: 'relative', flex: '1 1 220px', minWidth: 180, maxWidth: 340 }}>
           <Search size={15} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: 'var(--muted)' }} />
           <input className="form-input" style={{ height: 40, paddingLeft: 34, width: '100%' }} placeholder="Search student by name or phone…"
@@ -226,7 +263,7 @@ export default function Fees() {
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(300px,1fr))', gap: 14 }}>
           {filtered.map(({ student, fee }) => {
-            const c = calcFee(fee);
+            const c = calcFee(fee, batchFee);
             const meta = STATUS_META[c.status];
             return (
               <div key={student.id} className="card" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12, cursor: 'pointer', transition: 'box-shadow .15s' }}
@@ -315,27 +352,34 @@ export default function Fees() {
               </div>
             </div>
 
-            {/* Payment history */}
+            {/* Installment / payment history */}
             <div>
-              <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 8 }}>Payment history ({draftPayments.length})</div>
+              <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 8 }}>Installments ({draftPayments.length})</div>
               {draftPayments.length === 0 ? (
-                <div style={{ fontSize: 12.5, color: 'var(--text-muted)', padding: '14px 0', textAlign: 'center' }}>No payments recorded yet.</div>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 240, overflowY: 'auto' }}>
-                  {[...draftPayments].sort((a, b) => (b.date || '').localeCompare(a.date || '')).map(p => (
-                    <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 9, border: '1px solid var(--border)' }}>
-                      <div style={{ width: 34, height: 34, borderRadius: 9, background: 'var(--pos-50)', color: 'var(--green-ink)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontWeight: 700, fontSize: 12 }}>{'₹'}</div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 13.5, fontWeight: 700 }}>{inr(p.amount)} <span style={{ fontSize: 11.5, fontWeight: 500, color: 'var(--text-muted)' }}>· {p.method}</span></div>
-                        <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{p.date}{p.note ? ` · ${p.note}` : ''}{p.recordedByName ? ` · by ${p.recordedByName}` : ''}</div>
+                <div style={{ fontSize: 12.5, color: 'var(--text-muted)', padding: '14px 0', textAlign: 'center' }}>No installments recorded yet.</div>
+              ) : (() => {
+                // Number installments chronologically (1 = earliest); show newest first.
+                const chrono = [...draftPayments].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+                const rank = {};
+                chrono.forEach((p, i) => { rank[p.id] = i + 1; });
+                const display = [...draftPayments].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 240, overflowY: 'auto' }}>
+                    {display.map(p => (
+                      <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 9, border: '1px solid var(--border)' }}>
+                        <div style={{ width: 34, height: 34, borderRadius: 9, background: 'var(--accent-50)', color: 'var(--accent-ink)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontWeight: 700, fontSize: 13 }}>{rank[p.id]}</div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: 13.5, fontWeight: 700 }}>{inr(p.amount)} <span style={{ fontSize: 11.5, fontWeight: 500, color: 'var(--text-muted)' }}>· {p.method}</span></div>
+                          <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>Installment {rank[p.id]} · {p.date}{p.note ? ` · ${p.note}` : ''}{p.recordedByName ? ` · by ${p.recordedByName}` : ''}</div>
+                        </div>
+                        <button className="btn btn-ghost btn-sm btn-icon" title="Edit" onClick={() => editPayment(p)}><Edit2 size={13} /></button>
+                        <button className="btn btn-ghost btn-sm btn-icon" title="Delete" style={{ color: 'var(--red-ink)' }}
+                          onClick={() => setConfirmBox({ message: `Delete this ${inr(p.amount)} installment?`, confirmLabel: 'Delete', onConfirm: () => { removePayment(p.id); setConfirmBox(null); } })}><Trash2 size={13} /></button>
                       </div>
-                      <button className="btn btn-ghost btn-sm btn-icon" title="Edit" onClick={() => editPayment(p)}><Edit2 size={13} /></button>
-                      <button className="btn btn-ghost btn-sm btn-icon" title="Delete" style={{ color: 'var(--red-ink)' }}
-                        onClick={() => setConfirmBox({ message: `Delete this ${inr(p.amount)} payment?`, confirmLabel: 'Delete', onConfirm: () => { removePayment(p.id); setConfirmBox(null); } })}><Trash2 size={13} /></button>
-                    </div>
-                  ))}
-                </div>
-              )}
+                    ))}
+                  </div>
+                );
+              })()}
             </div>
 
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', borderTop: '1px solid var(--border)', paddingTop: 12 }}>
