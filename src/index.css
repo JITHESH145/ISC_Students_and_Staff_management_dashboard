@@ -154,7 +154,8 @@ html, body, #root { height: 100%; font-family: var(--font-body); background: var
    wider than the screen must scroll inside its own container (e.g. tables use
    .table-container), never widen the page — otherwise the browser expands the
    layout viewport and the responsive breakpoints below stop firing. */
-html, body { max-width: 100vw; overflow-x: hidden; }
+html, body, #root { max-width: 100%; overflow-x: hidden; }
+#root { width: 100%; }
 h1,h2,h3,h4 { font-family: var(--font-display); color: var(--text); letter-spacing: -0.01em; }
 a { color: inherit; text-decoration: none; }
 input, select, textarea, button { font-family: var(--font-body); font-size: var(--fs-md); }
