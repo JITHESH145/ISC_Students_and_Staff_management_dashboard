@@ -215,7 +215,7 @@ export default function Tasks() {
       )}
 
       {/* Toolbar */}
-      <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap', marginBottom:18 }}>
+      <div className="mobile-stack" style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap', marginBottom:18 }}>
         <div className="search-bar" style={{ width:280 }}>
           <Search size={15} style={{ color:'var(--text-muted)' }} />
           <input placeholder="Search board by task or assignee…" value={search} onChange={e => setSearch(e.target.value)} />

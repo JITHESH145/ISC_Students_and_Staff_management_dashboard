@@ -417,6 +417,11 @@ tbody tr:hover { background:var(--surface-hover); }
   .mobile-stack .btn { width: 100%; }
   /* Collapse an inline multi-column grid to a single column on phones. */
   .mobile-1col { grid-template-columns: 1fr !important; }
+  /* Broad net: any inline two/three-column "1fr 1fr" grid (React serializes
+     gridTemplateColumns to this) stacks to a single column on phones. Auto-fit
+     grids and calendars use other patterns and are unaffected. */
+  [style*="grid-template-columns: 1fr 1fr"],
+  [style*="grid-template-columns:1fr 1fr"] { grid-template-columns: 1fr !important; }
 }
 
 @keyframes fadein { from { opacity: 0; } to { opacity: 1; } }

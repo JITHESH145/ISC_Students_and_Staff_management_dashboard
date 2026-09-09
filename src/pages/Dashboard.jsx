@@ -680,7 +680,7 @@ export default function Dashboard() {
       )}
 
       {/* Bottom grid: Recent Activity + At-Risk */}
-      <div style={{ display:'grid', gridTemplateColumns:'1.5fr 1fr', gap:18 }}>
+      <div className="mobile-1col" style={{ display:'grid', gridTemplateColumns:'1.5fr 1fr', gap:18 }}>
         {/* Recent Activity */}
         <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:16, boxShadow:'var(--shadow-sm)', padding:'18px 20px' }}>
           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:14 }}>

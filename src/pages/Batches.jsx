@@ -1432,7 +1432,7 @@ export default function Batches() {
 
           return (
             <div>
-              <div style={{ display:'flex', gap:10, marginBottom:14, flexWrap:'wrap' }}>
+              <div className="mobile-stack" style={{ display:'flex', gap:10, marginBottom:14, flexWrap:'wrap' }}>
                 <input className="form-input" style={{ flex:2, minWidth:200 }} placeholder="Search by name, phone, parent, VARK, class, school..."
                   value={studentSearch} onChange={e => { setStudentSearch(e.target.value); setStudentPage(0); }}/>
                 <select className="form-input" style={{ flex:1, minWidth:140 }}

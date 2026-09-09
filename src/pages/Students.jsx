@@ -133,7 +133,7 @@ export default function StudentsPage() {
       )}
 
       {/* Search + batch filter row */}
-      <div style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+      <div className="mobile-stack" style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
         <div className="search-bar" style={{ flex: 1, minWidth: 220 }}>
           <Search size={15} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
           <input placeholder="Search name, phone, ClassPlus ID, email..."

@@ -177,7 +177,7 @@ export default function Concerns() {
         </button>
       </div>
 
-      <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap', marginBottom:18 }}>
+      <div className="mobile-stack" style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap', marginBottom:18 }}>
         <div className="search-bar" style={{ width:320 }}>
           <Search size={15} style={{ color:'var(--text-muted)', flexShrink:0 }} />
           <input placeholder="Search concern, student or category…"

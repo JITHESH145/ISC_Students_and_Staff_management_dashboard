@@ -446,7 +446,7 @@ export default function Assessments({ filterBatchId = null }) {
       )}
 
       {/* Filter bar */}
-      <div style={{ display:'flex', gap:10, flexWrap:'wrap', marginBottom:16, alignItems:'center' }}>
+      <div className="mobile-stack" style={{ display:'flex', gap:10, flexWrap:'wrap', marginBottom:16, alignItems:'center' }}>
         <div style={{ position:'relative', flex:'1 1 200px', minWidth:160 }}>
           <Search size={14} style={{ position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', color:'#9CA3AF' }}/>
           <input
