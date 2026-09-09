@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Fragment } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   getBatches, getStaffBatches, getBatchSchedules, getAllSchedules, addBatchSchedule,
@@ -187,6 +187,11 @@ export default function Schedule() {
   const [reportLoading, setReportLoading] = useState(false);
   const [attDateFilter, setAttDateFilter] = useState(localDateStr(new Date())); // default: today
   const [attStaffFilter, setAttStaffFilter] = useState('');
+  const [attView,        setAttView]        = useState('session'); // 'session' | 'student'
+  const [attStudentSearch, setAttStudentSearch] = useState('');
+  const [attBatchFilter, setAttBatchFilter] = useState('');
+  const [attExpanded,    setAttExpanded]    = useState({});   // row id → open
+  const [attStudentInfo, setAttStudentInfo] = useState({});   // studentId → { phone, batch }
 
   // Schedule Coverage (tab) — which students got a class scheduled vs missed
   const [covBatch,     setCovBatch]     = useState('');
@@ -289,7 +294,21 @@ export default function Schedule() {
         } catch { return { session: s, attendance: null }; }
       })
     );
-    setAttReport(results.filter(r => r.attendance?.attendance || r.attendance?.records));
+    const withAtt = results.filter(r => r.attendance?.attendance || r.attendance?.records);
+    setAttReport(withAtt);
+    // Build a studentId → { phone, batch } map from the batches that have
+    // attendance, so the By-Student report can show phone numbers.
+    const scope = { role: profile?.role, uid: profile?.uid, email: profile?.email };
+    const batchIds = [...new Set(withAtt.map(r => r.session?.batchId).filter(Boolean))];
+    const info = {};
+    await Promise.all(batchIds.map(async bid => {
+      try {
+        const { students } = await getBatchStudents(bid, scope);
+        const bName = batchName(bid);
+        (students || []).forEach(st => { info[st.id] = { phone: st.phone || st.whatsappNumber || '', batch: st.batchName || bName }; });
+      } catch { /* ignore batch load failures */ }
+    }));
+    setAttStudentInfo(info);
     setReportLoading(false);
   };
 
@@ -918,64 +937,237 @@ export default function Schedule() {
           return '';
         };
         const facultyNames = [...new Set(attReport.map(r => r.session?.facultyName).filter(Boolean))];
-        const shown = attReport.filter(r => {
-          if (r.session?.status === 'cancelled') return false; // cancelled classes don't count
+        // Batches that have attendance (for the batch filter dropdown).
+        const batchOptions = [...new Map(
+          attReport.map(r => [r.session?.batchId, r.session?.batchName || batchName(r.session?.batchId)])
+            .filter(([id]) => id)
+        ).entries()].map(([id, name]) => ({ id, name })).sort((a, b) => (a.name||'').localeCompare(b.name||''));
+
+        // Sessions passing staff + batch + cancelled filters; then the date
+        // filter. Both views (session & student) derive from the same `shown`.
+        const baseFiltered = attReport.filter(r => {
+          if (r.session?.status === 'cancelled') return false;
           if (attStaffFilter && r.session?.facultyName !== attStaffFilter) return false;
-          if (attDateFilter && dateOf(r) !== attDateFilter) return false;
+          if (attBatchFilter && r.session?.batchId !== attBatchFilter) return false;
           return true;
         });
+        const shown = baseFiltered.filter(r => !attDateFilter || dateOf(r) === attDateFilter);
+
+        const pctColor = (p) => p >= 85 ? 'var(--green-ink)' : p >= 60 ? 'var(--amber-ink)' : 'var(--red-ink)';
+        const RateBar = ({ p }) => (
+          <div style={{ display:'flex', alignItems:'center', gap:8, minWidth:90 }}>
+            <div style={{ flex:1, height:6, borderRadius:4, background:'var(--neg-50)', overflow:'hidden', minWidth:44 }}>
+              <div style={{ width:`${p}%`, height:'100%', background:pctColor(p), borderRadius:4 }}/>
+            </div>
+            <span style={{ fontSize:12, fontWeight:700, color:pctColor(p), width:34, textAlign:'right' }}>{p}%</span>
+          </div>
+        );
+
+        // Overall stats across the currently-shown sessions.
+        let totPresent = 0, totMarks = 0;
+        const studentIds = new Set();
+        shown.forEach(({ attendance }) => {
+          const stored = attendance?.attendance || attendance?.records;
+          if (!stored) return;
+          Object.entries(stored).forEach(([sid, v]) => { totMarks++; studentIds.add(sid); if (v.present) totPresent++; });
+        });
+        const overallPct = totMarks ? Math.round((totPresent / totMarks) * 100) : 0;
+
+        // Per-student aggregation (by-student view) — respects all filters.
+        const perStudent = {};
+        shown.forEach(({ session, attendance }) => {
+          const stored = attendance?.attendance || attendance?.records;
+          if (!stored) return;
+          const d = dateOf({ session, attendance });
+          const sBatch = session.batchName || batchName(session.batchId);
+          Object.entries(stored).forEach(([sid, v]) => {
+            if (!perStudent[sid]) perStudent[sid] = { id: sid, name: v.name || sid, phone: attStudentInfo[sid]?.phone || '', batch: attStudentInfo[sid]?.batch || sBatch, present: 0, total: 0, sessions: [] };
+            perStudent[sid].total++;
+            if (v.present) perStudent[sid].present++;
+            perStudent[sid].sessions.push({ key: session.id, title: session.title, batch: sBatch, date: d, present: !!v.present });
+          });
+        });
+        const sq = attStudentSearch.toLowerCase();
+        const students = Object.values(perStudent)
+          .map(s => ({ ...s, pct: s.total ? Math.round((s.present / s.total) * 100) : 0, sessions: s.sessions.sort((a, b) => (b.date || '').localeCompare(a.date || '')) }))
+          .filter(s => !sq || s.name.toLowerCase().includes(sq) || (s.phone || '').includes(attStudentSearch))
+          .sort((a, b) => a.name.localeCompare(b.name));
+        const toggleRow = (id) => setAttExpanded(m => ({ ...m, [id]: !m[id] }));
+
         return (
           <div>
-            {/* Filters — default to today */}
+            {/* Toolbar: view toggle + export */}
             <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:14, flexWrap:'wrap' }}>
+              <div style={{ display:'flex', background:'var(--surface)', border:'1px solid var(--border)', borderRadius:9, padding:3 }}>
+                {[{ key:'session', label:'By Session' }, { key:'student', label:'By Student' }].map(v => (
+                  <span key={v.key} onClick={() => setAttView(v.key)}
+                    style={{ padding:'6px 16px', borderRadius:7, fontSize:12.5, fontWeight:600, cursor:'pointer',
+                      background: attView===v.key ? 'var(--accent-50)' : 'transparent',
+                      color: attView===v.key ? 'var(--accent-ink)' : 'var(--muted)' }}>{v.label}</span>
+                ))}
+              </div>
+              <div style={{ flex:1 }}/>
+              <button className="btn btn-secondary btn-sm" onClick={exportAttendance} disabled={attReport.length === 0}><Download size={13}/> Export CSV</button>
+            </div>
+
+            {/* Summary stat tiles */}
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit,minmax(150px,1fr))', gap:12, marginBottom:14 }}>
+              <div className="card" style={{ padding:'14px 16px' }}>
+                <div style={{ fontSize:11, color:'var(--muted)', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.05em' }}>Attendance Rate</div>
+                <div style={{ fontSize:26, fontWeight:700, color:pctColor(overallPct), marginTop:2 }}>{overallPct}%</div>
+                <div style={{ height:6, borderRadius:4, background:'var(--neg-50)', marginTop:8, overflow:'hidden' }}>
+                  <div style={{ width:`${overallPct}%`, height:'100%', background:pctColor(overallPct), borderRadius:4, transition:'width .4s' }}/>
+                </div>
+              </div>
+              <div className="card" style={{ padding:'14px 16px' }}>
+                <div style={{ fontSize:11, color:'var(--muted)', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.05em' }}>Present / Marked</div>
+                <div style={{ fontSize:26, fontWeight:700, marginTop:2 }}>{totPresent}<span style={{ fontSize:15, color:'var(--muted)', fontWeight:500 }}> / {totMarks}</span></div>
+              </div>
+              <div className="card" style={{ padding:'14px 16px' }}>
+                <div style={{ fontSize:11, color:'var(--muted)', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.05em' }}>{attView==='student' ? 'Students Tracked' : 'Sessions Shown'}</div>
+                <div style={{ fontSize:26, fontWeight:700, marginTop:2 }}>{attView==='student' ? studentIds.size : shown.length}</div>
+              </div>
+            </div>
+
+            {/* Filters — search (student), date, batch, staff (both views) */}
+            <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:14, flexWrap:'wrap' }}>
+              {attView === 'student' && (
+                <div style={{ position:'relative', minWidth:200, flex:'1 1 220px', maxWidth:320 }}>
+                  <Search size={15} style={{ position:'absolute', left:11, top:'50%', transform:'translateY(-50%)', color:'var(--muted)' }}/>
+                  <input className="form-input" style={{ height:36, paddingLeft:34, width:'100%' }} placeholder="Search student by name or phone…"
+                    value={attStudentSearch} onChange={e => setAttStudentSearch(e.target.value)}/>
+                </div>
+              )}
               <div style={{ display:'flex', alignItems:'center', gap:6 }}>
                 <span style={{ fontSize:12, color:'var(--muted)', fontWeight:600 }}>Date</span>
                 <input type="date" className="form-input" style={{ height:36, width:'auto' }} value={attDateFilter} onChange={e => setAttDateFilter(e.target.value)}/>
                 <button className="btn btn-ghost btn-sm" onClick={() => setAttDateFilter(localDateStr(new Date()))}>Today</button>
                 {attDateFilter && <button className="btn btn-ghost btn-sm" onClick={() => setAttDateFilter('')}>All dates</button>}
               </div>
+              <select className="form-input" style={{ height:36, width:'auto' }} value={attBatchFilter} onChange={e => setAttBatchFilter(e.target.value)}>
+                <option value="">All batches</option>
+                {batchOptions.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+              </select>
               <select className="form-input" style={{ height:36, width:'auto' }} value={attStaffFilter} onChange={e => setAttStaffFilter(e.target.value)}>
                 <option value="">All staff / faculty</option>
                 {facultyNames.map(n => <option key={n} value={n}>{n}</option>)}
               </select>
-              <div style={{ flex:1 }}/>
-              <div style={{ fontSize:13, color:'var(--muted)' }}>{reportLoading ? 'Loading…' : `${shown.length} of ${attReport.length} sessions`}</div>
-              <button className="btn btn-secondary btn-sm" onClick={exportAttendance} disabled={attReport.length === 0}><Download size={13}/> Export CSV</button>
             </div>
+
             {reportLoading && <Loading/>}
-            {!reportLoading && shown.length === 0 && (
-              <div className="card" style={{ textAlign:'center', padding:48, color:'var(--muted)' }}>
-                {attReport.length === 0 ? 'No attendance data yet. Mark attendance on sessions from the Calendar tab.'
-                  : `No attendance for ${attDateFilter || 'the selected filters'}${attStaffFilter ? ` · ${attStaffFilter}` : ''}. Try “All dates” or another staff.`}
-              </div>
-            )}
-            {!reportLoading && shown.map(({ session, attendance }) => {
-              const stored = attendance?.attendance || attendance?.records;
-              if (!stored) return null;
-              const entries = Object.entries(stored);
-              const presentN = entries.filter(([, v]) => v.present).length;
-              const absentN = entries.length - presentN;
-              return (
-                <div key={session.id} className="card" style={{ padding:'14px 18px', marginBottom:10 }}>
-                  <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:10, flexWrap:'wrap' }}>
-                    <div style={{ flex:1, minWidth:180 }}>
-                      <div style={{ fontSize:14, fontWeight:600 }}>{session.title}</div>
-                      <div style={{ fontSize:12, color:'var(--muted)' }}>{session.batchName || batchName(session.batchId)} · {dateOf({ session, attendance }) || session.scheduledDate || session.day} {session.time && `· ${session.time}`}</div>
-                    </div>
-                    {session.facultyName && <span className="badge badge-blue">Marked by {session.facultyName}</span>}
-                    <span className="badge badge-green">{presentN} present</span>
-                    <span className="badge badge-red">{absentN} absent</span>
-                  </div>
-                  <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
-                    {entries.map(([sid, v]) => (
-                      <div key={sid} style={{ display:'flex', alignItems:'center', gap:5, padding:'4px 10px', borderRadius:20, fontSize:11, fontWeight:500, background: v.present ? 'var(--pos-50)' : 'var(--neg-50)', color: v.present ? 'var(--green-ink)' : 'var(--red-ink)' }}>
-                        {v.present ? <CheckCircle size={11}/> : <XCircle size={11}/>}{v.name}
-                      </div>
-                    ))}
-                  </div>
+
+            {/* ── BY SESSION (table) ── */}
+            {!reportLoading && attView === 'session' && (
+              shown.length === 0 ? (
+                <div className="card" style={{ textAlign:'center', padding:48, color:'var(--muted)' }}>
+                  {attReport.length === 0 ? 'No attendance data yet. Mark attendance on sessions from the Calendar tab.'
+                    : 'No attendance for the selected filters. Try “All dates”, another batch or staff.'}
                 </div>
-              );
-            }).filter(Boolean)}
+              ) : (
+                <div className="table-container" style={{ overflowX:'auto' }}>
+                  <table style={{ minWidth:720, width:'100%' }}>
+                    <thead><tr>
+                      <th style={{ width:34 }}></th>
+                      <th>Date</th><th>Class</th><th>Batch</th><th>Faculty</th>
+                      <th style={{ textAlign:'center' }}>Present</th><th style={{ textAlign:'center' }}>Absent</th><th>Rate</th>
+                    </tr></thead>
+                    <tbody>
+                      {shown.map(({ session, attendance }) => {
+                        const stored = attendance?.attendance || attendance?.records;
+                        if (!stored) return null;
+                        const entries = Object.entries(stored);
+                        const presentN = entries.filter(([, v]) => v.present).length;
+                        const absentN = entries.length - presentN;
+                        const pct = entries.length ? Math.round((presentN / entries.length) * 100) : 0;
+                        const open = !!attExpanded[session.id];
+                        return (
+                          <Fragment key={session.id}>
+                            <tr style={{ cursor:'pointer' }} onClick={() => toggleRow(session.id)}>
+                              <td style={{ color:'var(--muted)' }}>{open ? <ChevronDown size={15}/> : <ChevronRight size={15}/>}</td>
+                              <td style={{ fontSize:12.5, whiteSpace:'nowrap' }}>{dateOf({ session, attendance }) || session.scheduledDate || session.day}{session.time ? ` · ${session.time}` : ''}</td>
+                              <td style={{ fontSize:13, fontWeight:600 }}>{session.title}</td>
+                              <td style={{ fontSize:12.5, color:'var(--muted)' }}>{session.batchName || batchName(session.batchId)}</td>
+                              <td style={{ fontSize:12.5, color:'var(--muted)' }}>{session.facultyName || '—'}</td>
+                              <td style={{ textAlign:'center', fontWeight:600, color:'var(--green-ink)' }}>{presentN}</td>
+                              <td style={{ textAlign:'center', fontWeight:600, color:'var(--red-ink)' }}>{absentN}</td>
+                              <td><RateBar p={pct}/></td>
+                            </tr>
+                            {open && (
+                              <tr>
+                                <td/><td colSpan={7} style={{ background:'var(--surface-sunken)', padding:'10px 14px' }}>
+                                  <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
+                                    {entries.map(([sid, v]) => (
+                                      <span key={sid} style={{ display:'flex', alignItems:'center', gap:5, padding:'4px 10px', borderRadius:20, fontSize:11, fontWeight:500, background: v.present ? 'var(--pos-50)' : 'var(--neg-50)', color: v.present ? 'var(--green-ink)' : 'var(--red-ink)' }}>
+                                        {v.present ? <CheckCircle size={11}/> : <XCircle size={11}/>}{v.name}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )
+            )}
+
+            {/* ── BY STUDENT (table) ── */}
+            {!reportLoading && attView === 'student' && (
+              students.length === 0 ? (
+                <div className="card" style={{ textAlign:'center', padding:48, color:'var(--muted)' }}>
+                  {attReport.length === 0 ? 'No attendance data yet. Mark attendance on sessions from the Calendar tab.'
+                    : attStudentSearch ? `No student matches “${attStudentSearch}”.` : 'No attendance records for the selected filters.'}
+                </div>
+              ) : (
+                <div className="table-container" style={{ overflowX:'auto' }}>
+                  <table style={{ minWidth:640, width:'100%' }}>
+                    <thead><tr>
+                      <th style={{ width:34 }}></th>
+                      <th>Student</th><th>Phone</th><th>Batch</th>
+                      <th style={{ textAlign:'center' }}>Present / Total</th><th>Attendance</th>
+                    </tr></thead>
+                    <tbody>
+                      {students.map(s => {
+                        const open = !!attExpanded[s.id];
+                        return (
+                          <Fragment key={s.id}>
+                            <tr style={{ cursor:'pointer' }} onClick={() => toggleRow(s.id)}>
+                              <td style={{ color:'var(--muted)' }}>{open ? <ChevronDown size={15}/> : <ChevronRight size={15}/>}</td>
+                              <td style={{ fontSize:13, fontWeight:600 }}>{s.name}</td>
+                              <td style={{ fontSize:12.5, color:'var(--muted)', whiteSpace:'nowrap' }}>{s.phone || '—'}</td>
+                              <td style={{ fontSize:12.5, color:'var(--muted)' }}>{s.batch || '—'}</td>
+                              <td style={{ textAlign:'center', fontSize:12.5 }}><b style={{ color:'var(--green-ink)' }}>{s.present}</b> / {s.total}</td>
+                              <td><RateBar p={s.pct}/></td>
+                            </tr>
+                            {open && (
+                              <tr>
+                                <td/><td colSpan={5} style={{ background:'var(--surface-sunken)', padding:'10px 14px' }}>
+                                  <div style={{ maxHeight:220, overflowY:'auto', display:'flex', flexDirection:'column', gap:4 }}>
+                                    {s.sessions.map((se, i) => (
+                                      <div key={se.key + i} style={{ display:'flex', alignItems:'center', gap:8, fontSize:12, padding:'4px 8px', borderRadius:6, background:'var(--surface)' }}>
+                                        <span style={{ display:'inline-flex', alignItems:'center', gap:4, fontWeight:600, width:74, color: se.present ? 'var(--green-ink)' : 'var(--red-ink)' }}>
+                                          {se.present ? <CheckCircle size={12}/> : <XCircle size={12}/>}{se.present ? 'Present' : 'Absent'}
+                                        </span>
+                                        <span style={{ color:'var(--muted)', width:96, whiteSpace:'nowrap' }}>{se.date || '—'}</span>
+                                        <span style={{ flex:1 }}>{se.title}</span>
+                                        <span style={{ color:'var(--muted)', fontSize:11 }}>{se.batch}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </td>
+                              </tr>
+                            )}
+                          </Fragment>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )
+            )}
           </div>
         );
       })()}
