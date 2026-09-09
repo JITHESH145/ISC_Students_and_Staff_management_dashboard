@@ -79,10 +79,11 @@ function AppShell() {
   if (!user)   return <Navigate to="/login" replace />;
 
   const role     = profile?.role || 'staff';
-  // Admin/Staff = CEO-level access, but without the Staff Requests, Daily
-  // Reports and Staff Management pages. They carry role 'ceo' (so all permission
-  // checks pass) plus access:'admin'; here we trim those items from the CEO nav.
-  const ADMIN_HIDDEN = ['/requests', '/reports', '/staff'];
+  // Admin/Staff = CEO-level access, but without the Staff Requests and Staff
+  // Management pages. They carry role 'ceo' (so all permission checks pass) plus
+  // access:'admin'; here we trim those items from the CEO nav. (Daily Reports
+  // stays, but the Reports page scopes an Admin to their own reports.)
+  const ADMIN_HIDDEN = ['/requests', '/staff'];
   const isAdmin  = profile?.access === 'admin';
   const navItems = isAdmin
     ? NAV_BY_ROLE.ceo.filter(i => !ADMIN_HIDDEN.includes(i.to))
@@ -145,7 +146,7 @@ export default function App() {
             <Route path="/batches"       element={<Batches />}         />
             <Route path="/leaderboard"   element={<Leaderboard />}     />
             <Route path="/tasks"         element={<Tasks />}           />
-            <Route path="/reports"       element={<BlockAdmin><Reports /></BlockAdmin>} />
+            <Route path="/reports"       element={<Reports />}         />
             <Route path="/leads"         element={<Leads />}           />
             <Route path="/fees"          element={<Fees />}            />
             <Route path="/documents"     element={<Documents />}       />

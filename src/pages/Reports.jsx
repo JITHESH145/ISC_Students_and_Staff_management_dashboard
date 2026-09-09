@@ -26,7 +26,9 @@ function isoToDisplay(iso) {
 
 export default function Reports() {
   const { profile } = useAuth();
-  const isCEO = profile?.role === 'ceo';
+  // Admin/Staff has CEO-level access elsewhere, but on Daily Reports they act
+  // like a staff member — they only see their own submitted reports.
+  const isCEO = profile?.role === 'ceo' && profile?.access !== 'admin';
 
   const [allReports, setAllReports] = useState([]);
   const [loading, setLoading]       = useState(true);
