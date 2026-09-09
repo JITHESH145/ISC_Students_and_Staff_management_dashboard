@@ -630,6 +630,14 @@ export const getSessionReports = async (scheduleId) => {
     .sort((a,b) => (b.createdAt?.seconds||0)-(a.createdAt?.seconds||0));
 };
 
+// Remove every progress report tied to a class session. Used when a schedule
+// is deleted so its progress reports don't linger orphaned on student profiles.
+export const deleteSessionReports = async (scheduleId) => {
+  const q = query(collection(db,'classReports'), where('scheduleId','==',scheduleId));
+  const snap = await getDocs(q);
+  await Promise.all(snap.docs.map(d => deleteDoc(doc(db,'classReports', d.id))));
+};
+
 // All reports for a single student across every class & faculty
 export const getStudentReports = async (studentId) => {
   const q = query(collection(db,'classReports'), where('studentId','==',studentId));

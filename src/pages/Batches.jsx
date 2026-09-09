@@ -700,8 +700,10 @@ export default function Batches() {
   const removeEditField = (idx) => {
     const f = editFields[idx];
     if (f.key === 'name') { setToast({ message:'The Kids Name field is required and cannot be removed.', type:'error' }); return; }
-    if (!window.confirm(`Remove the "${f.label}" field?\n\nThe column disappears from the table and add-student form, but any data already captured for existing students is kept and stays visible on each student's profile under "Additional Details".`)) return;
-    setEditFields(editFields.filter((_,i) => i !== idx));
+    setConfirmDialog({
+      message: `Remove the "${f.label}" field? The column disappears from the table and add-student form, but any data already captured for existing students is kept and stays visible on each student's profile under "Additional Details".`,
+      onConfirm: () => setEditFields(prev => prev.filter(x => x.key !== f.key)),
+    });
   };
 
   const handleSaveFieldConfig = async () => {

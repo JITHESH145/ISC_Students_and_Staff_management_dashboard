@@ -4,7 +4,7 @@ import {
   getBatches, getStaffBatches, getBatchSchedules, getAllSchedules, addBatchSchedule,
   deleteBatchSchedule, updateScheduleStatus, updateBatchSchedule, saveAttendance,
   getSessionAttendance, deleteSessionAttendance, getBatchStudents, getStaffProfiles,
-  saveClassReport, updateClassReport, getSessionReports, getStudentReports,
+  saveClassReport, updateClassReport, getSessionReports, deleteSessionReports, getStudentReports,
   getAllAssessments, notifyStaff,
 } from '../firebase/services';
 import { Modal, Toast, Loading, Confirm } from '../components/ui';
@@ -915,7 +915,27 @@ export default function Schedule() {
                 </select>
                 <div style={{ flex:1 }}/>
                 <button className="btn btn-sm" style={{ background:'var(--neg-50)', color:'var(--red-ink)', border:'none' }}
-                  onClick={() => askConfirm('Delete this entry?', async () => { await deleteBatchSchedule(slotDetail.id); await reloadSchedules(); setSlotDetail(null); })}>
+                  onClick={async () => {
+                    // Warn if the class has attendance and/or progress reports —
+                    // deleting the class removes those permanently too.
+                    const [att, reps] = await Promise.all([
+                      getSessionAttendance(slotDetail.id).catch(() => []),
+                      getSessionReports(slotDetail.id).catch(() => []),
+                    ]);
+                    const hasAtt = att.some(a => a.attendance || a.records);
+                    const nReps = reps.length;
+                    const parts = [hasAtt && 'its attendance record', nReps && `${nReps} progress report${nReps > 1 ? 's' : ''}`].filter(Boolean);
+                    const message = parts.length
+                      ? `This class has ${parts.join(' and ')}. Deleting the class will permanently delete ${parts.join(' and ')} as well. This cannot be undone.`
+                      : 'Delete this entry? This cannot be undone.';
+                    askConfirm(message, async () => {
+                      await deleteSessionAttendance(slotDetail.id).catch(() => {});
+                      await deleteSessionReports(slotDetail.id).catch(() => {});
+                      await deleteBatchSchedule(slotDetail.id);
+                      await reloadSchedules();
+                      setSlotDetail(null);
+                    });
+                  }}>
                   <Trash2 size={12}/> Delete
                 </button>
               </div>

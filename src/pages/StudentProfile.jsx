@@ -5,14 +5,15 @@ import {
   getFollowUps, addFollowUp, getAssessments, addAssessment,
   getStaffProfiles, updateWeakSubjects, updateCourseFlowStep, addNotification,
   getStudentReports, getStudentAttendanceSummary, getBatchTasks,
-  getStudentBatchAssessments
+  getStudentBatchAssessments,
+  saveClassReport, updateClassReport, deleteClassReport
 } from '../firebase/services';
-import { Modal, Toast, Avatar, StatusBadge, Loading, FormRow } from '../components/ui';
+import { Modal, Toast, Avatar, StatusBadge, Loading, FormRow, Confirm } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import {
   ArrowLeft, Plus, Phone, Mail, MapPin, BookOpen,
   User, Calendar, Edit, CheckCircle, Circle, AlertTriangle,
-  TrendingUp, TrendingDown, Minus, ChevronDown, ChevronUp
+  TrendingUp, TrendingDown, Minus, ChevronDown, ChevronUp, Trash2
 } from 'lucide-react';
 
 // ── Default Course Flow (fallback if batch has no custom flow) ──
@@ -82,6 +83,10 @@ export default function StudentProfile() {
   const [asgStatus,   setAsgStatus]   = useState(''); // '', 'done', 'pending', 'overdue'
   const [asgStaff,    setAsgStaff]    = useState('');
   const [reportStaff, setReportStaff] = useState(''); // progress-report faculty filter
+  const [reportModal, setReportModal] = useState(null); // null | 'add' | 'edit'
+  const [reportForm,  setReportForm]  = useState({ id:'', sessionTitle:'', sessionDate:'', rating:'', note:'' });
+  const [savingReport, setSavingReport] = useState(false);
+  const [confirmBox,  setConfirmBox]  = useState(null); // { message, onConfirm, confirmLabel }
   const [staffList,   setStaffList]   = useState([]);
   const [loading,     setLoading]     = useState(true);
   const [activeTab,   setActiveTab]   = useState('overview');
@@ -284,6 +289,62 @@ export default function StudentProfile() {
 
   const toggleWeak = (sub) => {
     setWeakSubjects(prev => prev.includes(sub) ? prev.filter(s => s !== sub) : [...prev, sub]);
+  };
+
+  // ── Progress reports (add / edit / delete, independent of the calendar) ──
+  const openAddReport = () => {
+    setReportForm({ id:'', sessionTitle:'', sessionDate: new Date().toISOString().slice(0,10), rating:'', note:'' });
+    setReportModal('add');
+  };
+  const openEditReport = (r) => {
+    setReportForm({ id:r.id, sessionTitle:r.sessionTitle || '', sessionDate:r.sessionDate || '', rating:r.rating || '', note:r.note || '' });
+    setReportModal('edit');
+  };
+  const handleSaveReport = async () => {
+    if (!reportForm.sessionTitle.trim() || !reportForm.note.trim()) {
+      setToast({ message:'Class title and progress report are required.', type:'error' });
+      return;
+    }
+    setSavingReport(true);
+    try {
+      if (reportModal === 'edit') {
+        await updateClassReport(reportForm.id, {
+          sessionTitle: reportForm.sessionTitle.trim(), sessionDate: reportForm.sessionDate,
+          rating: reportForm.rating, note: reportForm.note.trim(),
+        });
+      } else {
+        await saveClassReport({
+          studentId: id, scheduleId: '', source: 'manual',
+          batchId: student?.batchId || '', batchName: batchName(student?.batchId),
+          facultyUid: profile?.uid || '', facultyName: profile?.name || 'Staff',
+          sessionTitle: reportForm.sessionTitle.trim(), sessionDate: reportForm.sessionDate,
+          rating: reportForm.rating, note: reportForm.note.trim(),
+        });
+      }
+      const reports = await getStudentReports(id).catch(() => []);
+      setClassReports(reports);
+      setToast({ message: reportModal === 'edit' ? 'Progress report updated!' : 'Progress report added!', type:'success' });
+      setReportModal(null);
+    } catch {
+      setToast({ message:'Could not save the report.', type:'error' });
+    }
+    setSavingReport(false);
+  };
+  const handleDeleteReport = (r) => {
+    setConfirmBox({
+      message: `Delete this progress report for "${r.sessionTitle || 'Class'}"? This cannot be undone.`,
+      confirmLabel: 'Delete',
+      onConfirm: async () => {
+        setConfirmBox(null);
+        try {
+          await deleteClassReport(r.id);
+          setClassReports(prev => prev.filter(x => x.id !== r.id));
+          setToast({ message:'Progress report deleted.', type:'info' });
+        } catch {
+          setToast({ message:'Could not delete the report.', type:'error' });
+        }
+      },
+    });
   };
 
   const toggleConductingStaff = (staffId) => {
@@ -838,28 +899,38 @@ export default function StudentProfile() {
           {/* Class progress reports timeline — ABOVE assignments, capped-scroll so the assignments below stay reachable */}
           <div className="card" style={{ padding:'16px 20px', marginBottom:16 }}>
             <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:12, flexWrap:'wrap' }}>
-              <div style={{ fontSize:14, fontWeight:700 }}>Progress Reports from Faculty ({shownReports.length})</div>
+              <div style={{ fontSize:14, fontWeight:700 }}>Progress Reports ({shownReports.length})</div>
               <div style={{ flex:1 }}/>
               <select className="form-input" style={{ width:'auto', height:32, fontSize:12 }} value={reportStaff} onChange={e => setReportStaff(e.target.value)}>
                 <option value="">All faculty</option>
                 {reportStaffNames.map(n => <option key={n} value={n}>{n}</option>)}
               </select>
+              <button className="btn btn-primary btn-sm" onClick={openAddReport}><Plus size={13}/> Add Report</button>
             </div>
             {shownReports.length === 0 ? (
               <div style={{ fontSize:13, color:'var(--text-muted)', padding:'20px 0', textAlign:'center' }}>
-                {classReports.length === 0 ? 'No class reports yet. Faculty add these from the Schedule → Progress Reports after a class.' : 'No reports for the selected filters.'}
+                {classReports.length === 0 ? 'No progress reports yet. Add one here, or faculty can add them from Schedule → Progress Reports after a class.' : 'No reports for the selected filters.'}
               </div>
             ) : (
               <div style={{ display:'flex', flexDirection:'column', gap:10, maxHeight:360, overflowY:'auto', paddingRight:4 }}>
                 {shownReports.map(r => (
-                  <div key={r.id} style={{ borderLeft:'3px solid var(--brand)', paddingLeft:12 }}>
-                    <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap', marginBottom:2 }}>
-                      <span style={{ fontSize:13, fontWeight:600 }}>{r.sessionTitle || 'Class'}</span>
-                      {r.rating && <span className="badge badge-blue" style={{ textTransform:'capitalize' }}>{r.rating.replace('-',' ')}</span>}
-                      <span style={{ fontSize:11.5, color:'var(--text-muted)' }}>{r.batchName} · {r.sessionDate}</span>
+                  <div key={r.id} style={{ borderLeft:'3px solid var(--brand)', paddingLeft:12, display:'flex', gap:8 }}>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ display:'flex', gap:8, alignItems:'center', flexWrap:'wrap', marginBottom:2 }}>
+                        <span style={{ fontSize:13, fontWeight:600 }}>{r.sessionTitle || 'Class'}</span>
+                        {r.rating && <span className="badge badge-blue" style={{ textTransform:'capitalize' }}>{r.rating.replace('-',' ')}</span>}
+                        {r.source === 'manual' && <span className="badge badge-amber">Manual</span>}
+                        <span style={{ fontSize:11.5, color:'var(--text-muted)' }}>{[r.batchName, r.sessionDate].filter(Boolean).join(' · ')}</span>
+                      </div>
+                      {r.note && <div style={{ fontSize:12.5, color:'var(--text-sub)', marginBottom:2 }}>{r.note}</div>}
+                      <div style={{ fontSize:11, color:'var(--text-muted)' }}>— {r.facultyName || 'Staff'}</div>
                     </div>
-                    {r.note && <div style={{ fontSize:12.5, color:'var(--text-sub)', marginBottom:2 }}>{r.note}</div>}
-                    <div style={{ fontSize:11, color:'var(--text-muted)' }}>— {r.facultyName || 'Staff'}</div>
+                    {(isCEOorAdmin || r.facultyUid === profile?.uid) && (
+                      <div style={{ display:'flex', gap:2, flexShrink:0 }}>
+                        <button className="btn btn-ghost btn-sm btn-icon" title="Edit" onClick={() => openEditReport(r)}><Edit size={13}/></button>
+                        <button className="btn btn-ghost btn-sm btn-icon" title="Delete" style={{ color:'var(--red-ink)' }} onClick={() => handleDeleteReport(r)}><Trash2 size={13}/></button>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -1111,6 +1182,45 @@ export default function StudentProfile() {
         </Modal>
       )}
 
+      {/* Add / edit progress report (independent of the calendar) */}
+      {reportModal && (
+        <Modal title={reportModal === 'edit' ? 'Edit Progress Report' : 'Add Progress Report'} onClose={() => setReportModal(null)} persistent>
+          <FormRow>
+            <div className="form-group">
+              <label className="form-label">Class Title *</label>
+              <input className="form-input" placeholder="e.g. Algebra — Chapter 3" value={reportForm.sessionTitle}
+                onChange={e => setReportForm(f => ({ ...f, sessionTitle: e.target.value }))}/>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Date of Class</label>
+              <input className="form-input" type="date" value={reportForm.sessionDate}
+                onChange={e => setReportForm(f => ({ ...f, sessionDate: e.target.value }))}/>
+            </div>
+          </FormRow>
+          <div className="form-group">
+            <label className="form-label">Rating</label>
+            <select className="form-input" value={reportForm.rating} onChange={e => setReportForm(f => ({ ...f, rating: e.target.value }))}>
+              <option value="">No rating</option>
+              <option value="excellent">Excellent</option>
+              <option value="good">Good</option>
+              <option value="average">Average</option>
+              <option value="needs-improvement">Needs improvement</option>
+            </select>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Progress Report *</label>
+            <textarea className="form-input" rows={5} placeholder="How did the student do in this class?"
+              value={reportForm.note} onChange={e => setReportForm(f => ({ ...f, note: e.target.value }))}/>
+          </div>
+          <div style={{ display:'flex', gap:10, justifyContent:'flex-end', marginTop:6 }}>
+            <button className="btn btn-ghost" onClick={() => setReportModal(null)}>Cancel</button>
+            <button className="btn btn-primary" onClick={handleSaveReport} disabled={savingReport}>
+              {savingReport ? 'Saving…' : reportModal === 'edit' ? 'Save Changes' : 'Add Report'}
+            </button>
+          </div>
+        </Modal>
+      )}
+
       {/* Course flow note */}
       {flowNoteModal && (() => {
         const ft = flowNoteModal.fieldType || 'none';
@@ -1150,6 +1260,7 @@ export default function StudentProfile() {
       })()}
 
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)}/>}
+      {confirmBox && <Confirm message={confirmBox.message} confirmLabel={confirmBox.confirmLabel} onConfirm={confirmBox.onConfirm} onCancel={() => setConfirmBox(null)}/>}
     </div>
   );
 }
