@@ -2,11 +2,12 @@ import { useEffect, useState, useRef } from 'react';
 import { collection, getDocs, doc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { createStaffAccount, recordDeletedStaffAccount, deleteStaffAuthAccount, resendStaffSetupEmail } from '../firebase/adminAuth';
-import { setRoleDoc, deleteRoleDoc, setDirectoryDoc, deleteDirectoryDoc } from '../firebase/services';
+import { setRoleDoc, deleteRoleDoc, setDirectoryDoc, deleteDirectoryDoc, sendNotificationEmail } from '../firebase/services';
+import { useAuth } from '../context/AuthContext';
 import { Modal, Toast, Loading, Confirm, FormRow } from '../components/ui';
 import {
   Plus, ShieldOff, RefreshCw, Shield,
-  BookOpen, Edit, CheckCircle, Mail, Key, Trash2
+  BookOpen, Edit, CheckCircle, Mail, Key, Trash2, Send
 } from 'lucide-react';
 
 const ALL_SUBJECTS = [
@@ -32,8 +33,10 @@ const ROLE_INFO = {
 };
 
 export default function StaffManagement() {
+  const { profile } = useAuth();
   const [staffList, setStaffList]     = useState([]);
   const [loading, setLoading]         = useState(true);
+  const [testingEmail, setTestingEmail] = useState(false);
   const [showModal, setShowModal]     = useState(false);
   const [showSuccess, setShowSuccess] = useState(null);
   const [showSubjectModal, setShowSubjectModal] = useState(null);
@@ -161,6 +164,34 @@ export default function StaffManagement() {
   };
   useEffect(() => () => { if (resendTimer.current) clearInterval(resendTimer.current); }, []);
 
+  // Diagnostic: send a real email to the signed-in CEO and surface the raw
+  // status from /api/send-email. 'disabled' → Vercel MAIL_* env vars not set;
+  // 'sent' → mail config works; 'send-failed'/'failed' → SMTP/auth problem.
+  const handleTestEmail = async () => {
+    const to = profile?.email;
+    if (!to) { setToast({ message:'No email on your profile to test with.', type:'error' }); return; }
+    setTestingEmail(true);
+    const res = await sendNotificationEmail({
+      toEmail: to,
+      subject: 'ISC SMS — test email',
+      heading: 'Email is working',
+      intro: 'This is a test email from ISC SMS. If you received it, action-notification emails are configured correctly.',
+      details: [{ label: 'Triggered by', value: profile?.name || to }, { label: 'When', value: new Date().toLocaleString('en-IN') }],
+      fromName: profile?.name || 'ISC SMS',
+    });
+    const status = res?.status || 'error';
+    const msg = {
+      sent:          `Test email sent to ${to}. Check your inbox (and spam).`,
+      disabled:      'Email is DISABLED: Vercel MAIL_USER / MAIL_APP_PASSWORD are not set. Add them and redeploy.',
+      'send-failed': `Mail server rejected the send: ${res?.error || 'check MAIL_USER / MAIL_APP_PASSWORD'}.`,
+      failed:        `The email endpoint returned an error (HTTP ${res?.code || '?'}).`,
+      'no-auth':     'Not signed in — cannot send.',
+      error:         'Could not reach the email endpoint (offline, or not deployed).',
+    }[status] || `Unexpected status: ${status}`;
+    setToast({ message: msg, type: status === 'sent' ? 'success' : status === 'disabled' ? 'info' : 'error' });
+    setTestingEmail(false);
+  };
+
   const handleResend = async (email) => {
     if (!email) return;
     if (resend?.email === email && resend.secs > 0) return; // on cooldown
@@ -201,9 +232,15 @@ export default function StaffManagement() {
           <h2 style={{ margin:0 }}>Staff Management</h2>
           <p style={{ fontSize:13, color:'var(--text-muted)', margin:'4px 0 0' }}>Manage your teaching and administrative team.</p>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowModal(true)}>
-          <Plus size={16} /> Add Staff Member
-        </button>
+        <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+          <button className="btn btn-secondary" onClick={handleTestEmail} disabled={testingEmail}
+            title="Send a test email to yourself and show whether email is configured">
+            <Send size={15} /> {testingEmail ? 'Sending…' : 'Test Email'}
+          </button>
+          <button className="btn btn-primary" onClick={() => setShowModal(true)}>
+            <Plus size={16} /> Add Staff Member
+          </button>
+        </div>
       </div>
 
       {/* KPI stat tiles */}
