@@ -501,6 +501,7 @@ export default function Batches() {
   const [studentJoinTo,   setStudentJoinTo]   = useState('');
   const [studentPage, setStudentPage] = useState(0);
   const [batchFilter, setBatchFilter] = useState('all');
+  const [batchListSearch, setBatchListSearch] = useState('');
 
   const [editFlow, setEditFlow]         = useState([]);
   const [editFields, setEditFields]     = useState([]);
@@ -2736,10 +2737,14 @@ export default function Batches() {
   const upcomingBatches  = batches.filter(b => b.status === 'upcoming');
   const completedBatches = batches.filter(b => b.status !== 'active' && b.status !== 'upcoming');
 
-  const filteredBatches = batchFilter === 'all'       ? batches
-                        : batchFilter === 'active'    ? activeBatches
-                        : batchFilter === 'upcoming'  ? upcomingBatches
-                        : completedBatches;
+  const byStatus = batchFilter === 'all'       ? batches
+                 : batchFilter === 'active'    ? activeBatches
+                 : batchFilter === 'upcoming'  ? upcomingBatches
+                 : completedBatches;
+  const bq = batchListSearch.trim().toLowerCase();
+  const filteredBatches = bq
+    ? byStatus.filter(b => (b.name || '').toLowerCase().includes(bq) || (b.course || '').toLowerCase().includes(bq))
+    : byStatus;
 
   return (
     <div>
@@ -2757,7 +2762,12 @@ export default function Batches() {
         )}
       </div>
 
-      <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div style={{ position: 'relative', flex: '1 1 240px', minWidth: 180, maxWidth: 340, order: -1 }}>
+          <Search size={15} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+          <input className="form-input" style={{ height: 38, paddingLeft: 34, width: '100%' }} placeholder="Search batch by name or course…"
+            value={batchListSearch} onChange={e => setBatchListSearch(e.target.value)} />
+        </div>
         {[
           { key: 'all',       label: `All batches ${batches.length}` },
           { key: 'active',    label: `Active ${activeBatches.length}` },
@@ -2782,6 +2792,12 @@ export default function Batches() {
         <div className="card" style={{ textAlign:'center', padding:60 }}>
           <div style={{ fontSize:14, color:'#6B7280', marginBottom:16 }}>No batches yet.</div>
           {isCEOorAdmin && <button className="btn btn-primary" onClick={() => setShowCreate(true)}><Plus size={16}/> Create First Batch</button>}
+        </div>
+      )}
+
+      {batches.length > 0 && filteredBatches.length === 0 && (
+        <div className="card" style={{ textAlign:'center', padding:40, color:'var(--text-muted)' }}>
+          No batches match{batchListSearch ? ` “${batchListSearch}”` : ' this filter'}.
         </div>
       )}
 

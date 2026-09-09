@@ -625,9 +625,9 @@ export default function Dashboard() {
               Manage batches <ChevronRight size={14} />
             </Link>
           </div>
-          <div className="table-container" style={{ border:'none', boxShadow:'none', borderRadius:0 }}>
+          <div className="table-container" style={{ border:'none', boxShadow:'none', borderRadius:0, maxHeight:360, overflowY:'auto' }}>
             <table>
-              <thead>
+              <thead style={{ position:'sticky', top:0, zIndex:1, background:'var(--surface)' }}>
                 <tr>
                   <th>Batch</th>
                   <th style={{ width:90 }}>Students</th>
