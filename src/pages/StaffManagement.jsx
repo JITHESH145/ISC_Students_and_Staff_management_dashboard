@@ -23,8 +23,8 @@ const ROLE_INFO = {
     desc:'Full access — all modules, assign tasks, manage all staff and reports'
   },
   admin: {
-    label:'Admin', badgeCls:'badge-purple', color:'#8B5CF6',
-    desc:'Manage students, batches, documents, concerns. Cannot manage staff.'
+    label:'Admin/Staff', badgeCls:'badge-purple', color:'#8B5CF6',
+    desc:'Full access like the CEO, except the Staff Requests and Daily Reports pages.'
   },
   staff: {
     label:'Staff', badgeCls:'badge-blue', color:'#3B82F6',
@@ -326,7 +326,7 @@ export default function StaffManagement() {
               </tr>
             )}
             {active.map(member => {
-              const ri = ROLE_INFO[member.role] || ROLE_INFO.staff;
+              const ri = ROLE_INFO[member.access === 'admin' ? 'admin' : member.role] || ROLE_INFO.staff;
               return (
                 <tr key={member.id}>
                   <td>
@@ -429,8 +429,8 @@ export default function StaffManagement() {
                   <td style={{ fontSize:13, fontWeight:500 }}>{member.name}</td>
                   <td style={{ fontSize:13, color:'#6B7280' }}>{member.email}</td>
                   <td>
-                    <span className={`badge ${ROLE_INFO[member.role]?.badgeCls || 'badge-gray'}`}>
-                      {member.role}
+                    <span className={`badge ${ROLE_INFO[member.access === 'admin' ? 'admin' : member.role]?.badgeCls || 'badge-gray'}`}>
+                      {member.access === 'admin' ? 'admin/staff' : member.role}
                     </span>
                   </td>
                   <td style={{ display:'flex', gap:6 }}>
@@ -493,6 +493,7 @@ export default function StaffManagement() {
                 onChange={e => setForm({...form, role:e.target.value})}
               >
                 <option value="staff">Staff — Limited access</option>
+                <option value="admin">Admin/Staff — Full access (no Staff Requests / Daily Reports)</option>
                 <option value="ceo">CEO — Full access</option>
               </select>
               <div style={{ fontSize:11, color:'#6B7280', marginTop:4 }}>

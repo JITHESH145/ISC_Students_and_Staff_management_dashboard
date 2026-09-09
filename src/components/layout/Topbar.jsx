@@ -101,7 +101,7 @@ export default function Topbar({ onMenu = () => {} }) {
         }}>{initials(profile?.name || 'U')}</div>
         <div className="topbar-user-info" style={{ lineHeight: 1.3 }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>{profile?.name || 'User'}</div>
-          <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'capitalize' }}>{profile?.role || 'staff'}</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', textTransform: 'capitalize' }}>{profile?.access === 'admin' ? 'Admin/Staff' : (profile?.role || 'staff')}</div>
         </div>
       </div>
     </header>

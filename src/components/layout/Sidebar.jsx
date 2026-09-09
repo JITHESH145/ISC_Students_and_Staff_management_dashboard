@@ -145,7 +145,7 @@ export default function Sidebar({ navItems = [], open = false, onClose = () => {
           }}>{initials}</div>
           <div style={{ flex: 1, overflow: 'hidden' }}>
             <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{profile?.name || 'User'}</div>
-            <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'capitalize' }}>{profile?.role || 'staff'}</div>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'capitalize' }}>{profile?.access === 'admin' ? 'Admin/Staff' : (profile?.role || 'staff')}</div>
           </div>
           <button onClick={handleLogout} title="Sign out" style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', padding: 4, borderRadius: 6, transition: 'color 0.15s' }}
             onMouseEnter={e => e.currentTarget.style.color = 'var(--text)'}

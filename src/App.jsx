@@ -79,7 +79,13 @@ function AppShell() {
   if (!user)   return <Navigate to="/login" replace />;
 
   const role     = profile?.role || 'staff';
-  const navItems = NAV_BY_ROLE[role] || NAV_BY_ROLE.staff;
+  // Admin/Staff = CEO-level access, but without the Staff Requests and Daily
+  // Reports pages. They carry role 'ceo' (so all permission checks pass) plus
+  // access:'admin'; here we just trim those two items from the CEO nav.
+  const isAdmin  = profile?.access === 'admin';
+  const navItems = isAdmin
+    ? NAV_BY_ROLE.ceo.filter(i => i.to !== '/requests' && i.to !== '/reports')
+    : (NAV_BY_ROLE[role] || NAV_BY_ROLE.staff);
 
   return (
     <NotifProvider>
@@ -103,6 +109,14 @@ function GuestGuard() {
   if (loading) return <Loading />;
   if (user) return <Navigate to="/" replace />;
   return <Outlet />;
+}
+
+// Blocks the Admin/Staff access tier from CEO-only pages (Staff Requests,
+// Daily Reports) even via a direct URL — they're removed from the nav too.
+function BlockAdmin({ children }) {
+  const { profile } = useAuth();
+  if (profile?.access === 'admin') return <Navigate to="/" replace />;
+  return children;
 }
 
 function HomeDashboard() {
@@ -130,13 +144,13 @@ export default function App() {
             <Route path="/batches"       element={<Batches />}         />
             <Route path="/leaderboard"   element={<Leaderboard />}     />
             <Route path="/tasks"         element={<Tasks />}           />
-            <Route path="/reports"       element={<Reports />}         />
+            <Route path="/reports"       element={<BlockAdmin><Reports /></BlockAdmin>} />
             <Route path="/leads"         element={<Leads />}           />
             <Route path="/fees"          element={<Fees />}            />
             <Route path="/documents"     element={<Documents />}       />
             <Route path="/staff"         element={<StaffManagement />} />
             <Route path="/trash"         element={<Trash />}           />
-            <Route path="/requests"      element={<Requests />}        />
+            <Route path="/requests"      element={<BlockAdmin><Requests /></BlockAdmin>} />
             <Route path="/schedule"      element={<Schedule />}        />
             <Route path="/notifications" element={<Notifications />}    />
           </Route>

@@ -79,13 +79,24 @@ const getSecondaryApp = () => {
   return initializeApp(mainApp.options, SECONDARY_APP_NAME);
 };
 
+// The picker offers "admin" as an access tier. An Admin gets CEO-level
+// authorization (roles.role = 'ceo', so all rules + UI permission checks pass
+// unchanged) but is tagged access:'admin' so the UI can label them
+// "Admin/Staff" and hide the CEO-only Staff Requests / Daily Reports pages.
+// Returns the resolved { authRole, access } for the given picked role.
+const resolveAccess = (pickedRole) => pickedRole === 'admin'
+  ? { authRole: 'ceo', access: 'admin' }
+  : { authRole: pickedRole, access: null };
+
 // Writes the three Firestore docs every staff member needs.
 const writeStaffDocs = async ({ uid, name, email, role, subjects }) => {
+  const { authRole, access } = resolveAccess(role);
   await setDoc(doc(db, 'staff', uid), {
     uid,
     name,
     email,
-    role,
+    role:           authRole,
+    access,                 // 'admin' | null — drives UI label + hidden pages
     subjects:       subjects || [],
     active:         true,
     needsAuthSetup: false, // no Firebase Console needed!
@@ -94,11 +105,11 @@ const writeStaffDocs = async ({ uid, name, email, role, subjects }) => {
 
   // Authorization source of truth — rules check /roles/{uid}, not the
   // staff profile (which the user could otherwise self-edit).
-  await setDoc(doc(db, 'roles', uid), { role, active: true });
+  await setDoc(doc(db, 'roles', uid), { role: authRole, active: true });
 
   // Safe directory mirror for staff-facing pickers (no fcmToken).
   await setDoc(doc(db, 'staffDirectory', uid), {
-    name, email, role, subjects: subjects || [], active: true,
+    name, email, role: authRole, access, subjects: subjects || [], active: true,
   });
 };
 
