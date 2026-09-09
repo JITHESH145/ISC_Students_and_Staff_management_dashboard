@@ -79,12 +79,13 @@ function AppShell() {
   if (!user)   return <Navigate to="/login" replace />;
 
   const role     = profile?.role || 'staff';
-  // Admin/Staff = CEO-level access, but without the Staff Requests and Daily
-  // Reports pages. They carry role 'ceo' (so all permission checks pass) plus
-  // access:'admin'; here we just trim those two items from the CEO nav.
+  // Admin/Staff = CEO-level access, but without the Staff Requests, Daily
+  // Reports and Staff Management pages. They carry role 'ceo' (so all permission
+  // checks pass) plus access:'admin'; here we trim those items from the CEO nav.
+  const ADMIN_HIDDEN = ['/requests', '/reports', '/staff'];
   const isAdmin  = profile?.access === 'admin';
   const navItems = isAdmin
-    ? NAV_BY_ROLE.ceo.filter(i => i.to !== '/requests' && i.to !== '/reports')
+    ? NAV_BY_ROLE.ceo.filter(i => !ADMIN_HIDDEN.includes(i.to))
     : (NAV_BY_ROLE[role] || NAV_BY_ROLE.staff);
 
   return (
@@ -148,7 +149,7 @@ export default function App() {
             <Route path="/leads"         element={<Leads />}           />
             <Route path="/fees"          element={<Fees />}            />
             <Route path="/documents"     element={<Documents />}       />
-            <Route path="/staff"         element={<StaffManagement />} />
+            <Route path="/staff"         element={<BlockAdmin><StaffManagement /></BlockAdmin>} />
             <Route path="/trash"         element={<Trash />}           />
             <Route path="/requests"      element={<BlockAdmin><Requests /></BlockAdmin>} />
             <Route path="/schedule"      element={<Schedule />}        />
