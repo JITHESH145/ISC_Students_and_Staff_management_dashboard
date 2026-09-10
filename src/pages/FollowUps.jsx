@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getAllFollowUps, getStudents, addFollowUp, completeFollowUp, notifyStaff, getStaffProfiles } from '../firebase/services';
+import { getAllFollowUps, getStudents, addFollowUp, completeFollowUp, notifyStaff, getStaffProfiles, getBatches, getBatchStudents } from '../firebase/services';
 import { Modal, Toast, Loading, Avatar, FormRow } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { Plus, Search, Mail, CheckCircle, Clock } from 'lucide-react';
@@ -9,6 +9,8 @@ export default function FollowUps() {
   const [followups, setFollowups]   = useState([]);
   const [students, setStudents]     = useState([]);
   const [staff, setStaff]           = useState([]);
+  const [batches, setBatches]       = useState([]);
+  const [batchStudentsList, setBatchStudentsList] = useState([]);
   const [loading, setLoading]       = useState(true);
   const [search, setSearch]         = useState('');
   const [filter, setFilter]         = useState('all');
@@ -18,6 +20,7 @@ export default function FollowUps() {
   const [toast, setToast]           = useState(null);
   const [saving, setSaving]         = useState(false);
   const [form, setForm] = useState({
+    batchId: '',
     studentId: '', studentName: '',
     staffId: '',
     note: '', nextAction: '', priority: 'normal'
@@ -26,17 +29,33 @@ export default function FollowUps() {
   const isCEOorAdmin = profile?.role === 'ceo';
   const scope = { role: profile?.role, uid: profile?.uid, email: user?.email };
 
+  // Staff belonging to a batch (its faculty + mentor).
+  const batchStaffFor = (batchId) => {
+    const batch = batches.find(b => b.id === batchId);
+    if (!batch) return [];
+    const ids = [...(batch.staffIds || []), batch.mentorId].filter(Boolean);
+    return staff.filter(s => ids.includes(s.id));
+  };
+
   const load = async () => {
     // Queries are scoped server-side: staff receive only their own
     // follow-ups / students (rules reject unscoped queries).
-    const [f, s, st] = await Promise.all([getAllFollowUps(scope), getStudents(scope), getStaffProfiles()]);
+    const [f, s, st, b] = await Promise.all([getAllFollowUps(scope), getStudents(scope), getStaffProfiles(), getBatches().catch(() => [])]);
     setFollowups(f);
     setStudents(s);
     setStaff(st.filter(s => s.active !== false && s.role !== 'ceo'));
+    setBatches(b || []);
     setLoading(false);
   };
 
   useEffect(() => { load(); }, []);
+
+  // Load the chosen batch's full student roster (the general list is paginated).
+  useEffect(() => {
+    if (!form.batchId) { setBatchStudentsList([]); return; }
+    getBatchStudents(form.batchId, scope).then(r => setBatchStudentsList(r.students || [])).catch(() => setBatchStudentsList([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.batchId]);
 
   const filtered = followups.filter(f => {
     const q = search.toLowerCase();
@@ -51,47 +70,51 @@ export default function FollowUps() {
     e.preventDefault();
     setSaving(true);
     try {
-      // Email pulled automatically from selected staff's Firestore record
-      const selectedStaff = staff.find(s => s.id === form.staffId);
-      if (!selectedStaff) {
-        setToast({ message: 'Please select a staff member.', type: 'error' });
-        setSaving(false);
-        return;
+      // Recipients: one selected staff, or every staff of the chosen batch.
+      let recipients;
+      if (form.staffId === '__all__') {
+        recipients = batchStaffFor(form.batchId).filter(s => s.email);
+        if (!recipients.length) { setToast({ message: 'No staff (with email) in this batch to assign.', type: 'error' }); setSaving(false); return; }
+      } else {
+        const sel = staff.find(s => s.id === form.staffId);
+        if (!sel) { setToast({ message: 'Please select a staff member.', type: 'error' }); setSaving(false); return; }
+        recipients = [sel];
       }
 
-      await addFollowUp({
-        studentId:       form.studentId,
-        studentName:     form.studentName,
-        assignedTo:      selectedStaff.name,
-        assignedToEmail: selectedStaff.email, // auto from Firestore
-        note:            form.note,
-        nextAction:      form.nextAction,
-        priority:        form.priority,
-        assignedBy:      profile?.name,
-        assignedByEmail: user?.email,
-      });
+      for (const selectedStaff of recipients) {
+        await addFollowUp({
+          studentId:       form.studentId,
+          studentName:     form.studentName,
+          assignedTo:      selectedStaff.name,
+          assignedToEmail: selectedStaff.email, // auto from Firestore
+          note:            form.note,
+          nextAction:      form.nextAction,
+          priority:        form.priority,
+          assignedBy:      profile?.name,
+          assignedByEmail: user?.email,
+        });
+        // In-app notification + structured email together
+        await notifyStaff({
+          toEmail:  selectedStaff.email,
+          fromName: profile?.name,
+          type:     'followup',
+          title:    'New Follow-Up Assigned',
+          body:     `Follow-up assigned: "${form.studentName}" — ${form.note.slice(0, 60)}`,
+          route:    '/followups',
+          intro:    `Hi ${selectedStaff.name}, a student follow-up has been assigned to you on ISC SMS.`,
+          details: [
+            { label: 'Student',     value: form.studentName },
+            { label: 'Note',        value: form.note },
+            { label: 'Next action', value: form.nextAction },
+            { label: 'Priority',    value: form.priority },
+            { label: 'Assigned by', value: `${profile?.name || 'ISC SMS'}${user?.email ? ` (${user.email})` : ''}` },
+          ].filter(d => d.value),
+        }).catch(() => {});
+      }
 
-      // In-app notification + structured email together
-      await notifyStaff({
-        toEmail:  selectedStaff.email,
-        fromName: profile?.name,
-        type:     'followup',
-        title:    'New Follow-Up Assigned',
-        body:     `Follow-up assigned: "${form.studentName}" — ${form.note.slice(0, 60)}`,
-        route:    '/followups',
-        intro:    `Hi ${selectedStaff.name}, a student follow-up has been assigned to you on ISC SMS.`,
-        details: [
-          { label: 'Student',     value: form.studentName },
-          { label: 'Note',        value: form.note },
-          { label: 'Next action', value: form.nextAction },
-          { label: 'Priority',    value: form.priority },
-          { label: 'Assigned by', value: `${profile?.name || 'ISC SMS'}${user?.email ? ` (${user.email})` : ''}` },
-        ].filter(d => d.value),
-      });
-
-      setToast({ message: `Follow-up assigned to ${selectedStaff.name}!`, type: 'success' });
+      setToast({ message: recipients.length > 1 ? `Follow-up assigned to ${recipients.length} staff!` : `Follow-up assigned to ${recipients[0].name}!`, type: 'success' });
       setShowModal(false);
-      setForm({ studentId: '', studentName: '', staffId: '', note: '', nextAction: '', priority: 'normal' });
+      setForm({ batchId: '', studentId: '', studentName: '', staffId: '', note: '', nextAction: '', priority: 'normal' });
       load();
     } catch (err) {
       setToast({ message: 'Failed: ' + err.message, type: 'error' });
@@ -237,32 +260,56 @@ export default function FollowUps() {
         <Modal title="Assign Follow-Up" onClose={() => setShowModal(false)} persistent>
           <form onSubmit={handleAdd} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div style={{ padding: '8px 12px', background: '#F0FDF4', borderRadius: 8, fontSize: 12, color: '#065F46' }}>
-              Select a student and staff member — email is auto-fetched from their account.
+              Pick a batch to narrow the student and staff lists — email is auto-fetched from their account.
             </div>
-            <div className="form-group">
-              <label className="form-label">Student *</label>
-              <select className="form-input" required value={form.studentId}
-                onChange={e => {
-                  const s = students.find(s => s.id === e.target.value);
-                  setForm({ ...form, studentId: e.target.value, studentName: s?.name || '' });
-                }}>
-                <option value="">Select student</option>
-                {students.map(s => <option key={s.id} value={s.id}>{s.name} — {s.course || ''}</option>)}
-              </select>
-            </div>
-            <div className="form-group">
-              <label className="form-label">Assign To *</label>
-              <select className="form-input" required value={form.staffId}
-                onChange={e => setForm({ ...form, staffId: e.target.value })}>
-                <option value="">Select staff member</option>
-                {staff.filter(s=>s.active!==false).map(s => <option key={s.id} value={s.id}>{s.name} — {s.access === 'admin' ? 'admin/staff' : s.role}</option>)}
-              </select>
-              {form.staffId && (
-                <div style={{ fontSize: 11, color: '#6B7280', marginTop: 4 }}>
-                  Will notify: <strong>{staff.find(s => s.id === form.staffId)?.email}</strong>
-                </div>
-              )}
-            </div>
+            {(() => {
+              const modalStudents = form.batchId ? batchStudentsList : students;
+              const modalStaff = form.batchId ? batchStaffFor(form.batchId).filter(s => s.active !== false) : staff.filter(s => s.active !== false);
+              return (
+                <>
+                  <div className="form-group">
+                    <label className="form-label">Batch <span style={{ fontWeight: 400, color: 'var(--text-muted)', fontSize: 11 }}>(optional — filters below)</span></label>
+                    <select className="form-input" value={form.batchId}
+                      onChange={e => setForm({ ...form, batchId: e.target.value, studentId: '', studentName: '', staffId: '' })}>
+                      <option value="">All batches</option>
+                      {batches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Student *</label>
+                    <select className="form-input" required value={form.studentId}
+                      onChange={e => {
+                        const s = modalStudents.find(s => s.id === e.target.value);
+                        setForm({ ...form, studentId: e.target.value, studentName: s?.name || '' });
+                      }}>
+                      <option value="">Select student</option>
+                      {modalStudents.map(s => <option key={s.id} value={s.id}>{s.name}{s.course ? ` — ${s.course}` : ''}</option>)}
+                    </select>
+                    {form.batchId && modalStudents.length === 0 && <div style={{ fontSize: 11, color: '#B91C1C', marginTop: 4 }}>No students in this batch.</div>}
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Assign To *</label>
+                    <select className="form-input" required value={form.staffId}
+                      onChange={e => setForm({ ...form, staffId: e.target.value })}>
+                      <option value="">Select staff member</option>
+                      {form.batchId && modalStaff.length > 0 && <option value="__all__">★ All staff of this batch ({modalStaff.length})</option>}
+                      {modalStaff.map(s => <option key={s.id} value={s.id}>{s.name} — {s.access === 'admin' ? 'admin/staff' : s.role}</option>)}
+                    </select>
+                    {form.batchId && modalStaff.length === 0 && <div style={{ fontSize: 11, color: '#B91C1C', marginTop: 4 }}>No staff assigned to this batch.</div>}
+                    {form.staffId === '__all__' && (
+                      <div style={{ fontSize: 11, color: '#6B7280', marginTop: 4 }}>
+                        Will assign & notify all {modalStaff.length} staff: <strong>{modalStaff.map(s => s.name).join(', ')}</strong>
+                      </div>
+                    )}
+                    {form.staffId && form.staffId !== '__all__' && (
+                      <div style={{ fontSize: 11, color: '#6B7280', marginTop: 4 }}>
+                        Will notify: <strong>{staff.find(s => s.id === form.staffId)?.email}</strong>
+                      </div>
+                    )}
+                  </div>
+                </>
+              );
+            })()}
             <div className="form-group">
               <label className="form-label">Instructions *</label>
               <textarea className="form-input" rows={3} required

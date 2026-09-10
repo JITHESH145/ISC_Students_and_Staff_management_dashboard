@@ -253,7 +253,19 @@ export default function Concerns() {
               <select className="form-input" required value={form.studentId}
                 onChange={e => setForm({...form, studentId:e.target.value})}>
                 <option value="">Select student</option>
-                {students.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                {students.map(s => {
+                  const cls = s.classStd || s.class || s.className;
+                  const syl = s.syllabus || s.board;
+                  const ph  = s.phone || s.whatsappNumber;
+                  const label = [
+                    s.name || 'Unnamed',
+                    cls ? `Class ${cls}` : null,
+                    syl || null,
+                    ph || null,
+                    s.batchName || null,
+                  ].filter(Boolean).join('  ·  ');
+                  return <option key={s.id} value={s.id}>{label}</option>;
+                })}
               </select>
             </div>
             <FormRow>

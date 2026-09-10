@@ -151,7 +151,7 @@ export default function Schedule() {
   const [studentsCache, setStudentsCache] = useState({}); // batchId -> [{id,name}]
 
   // Calendar
-  const [view,          setView]          = useState('week'); // 'week' | 'month'
+  const [view,          setView]          = useState('day'); // 'day' | 'week' | 'month'
   const [myOnly,        setMyOnly]        = useState(false);   // staff: show only my classes
   const [calDate,       setCalDate]       = useState(new Date());
   const [slotDetail,    setSlotDetail]    = useState(null);
@@ -234,14 +234,22 @@ export default function Schedule() {
     return () => { cancelled = true; };
   }, [activeTab, covBatch]);
 
+  // Staff see only the batches they're assigned to (as faculty or mentor);
+  // CEO/Admin (role 'ceo') see every batch. Filters the shared calendar so a
+  // staff member sees the full schedule of their batches but not others'.
+  const scopeForStaff = (sch, batchList) => {
+    if (profile?.role === 'ceo') return sch;
+    const ids = new Set((batchList || [])
+      .filter(b => (b.staffIds || []).includes(profile?.uid) || b.mentorId === profile?.uid)
+      .map(b => b.id));
+    return (sch || []).filter(s => ids.has(s.batchId));
+  };
+
   // ── Load batches + all schedules ──────────────────────────────
-  const reloadSchedules = async (batchList) => {
+  const reloadSchedules = async () => {
     try {
-      if (selectedBatch === ALL) {
-        setSchedules(await getAllSchedules());
-      } else {
-        setSchedules(await getBatchSchedules(selectedBatch));
-      }
+      const sch = selectedBatch === ALL ? await getAllSchedules() : await getBatchSchedules(selectedBatch);
+      setSchedules(scopeForStaff(sch, batches));
     } catch (err) {
       import.meta.env.DEV && console.error('Schedule load failed:', err);
       setSchedules([]);
@@ -261,7 +269,7 @@ export default function Schedule() {
         setBatches(bList);
         setStaffList(sList);
         setAssessments(asmts);
-        setSchedules(sch);
+        setSchedules(scopeForStaff(sch, bList));
       } catch (err) {
         import.meta.env.DEV && console.error('Schedule initial load failed:', err);
       } finally {
