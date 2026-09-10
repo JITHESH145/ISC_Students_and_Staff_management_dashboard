@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { getBatches, getBatchStudents, getFeesByBatch, saveFee, updateBatch } from '../firebase/services';
 import { useAuth } from '../context/AuthContext';
 import { Modal, Toast, Loading, Confirm } from '../components/ui';
-import { Wallet, Plus, Search, Trash2, Edit2, CheckCircle, TrendingUp, AlertTriangle } from 'lucide-react';
+import { Wallet, Plus, Search, Trash2, Edit2, CheckCircle, TrendingUp, AlertTriangle, School } from 'lucide-react';
 
 const METHODS = ['Cash', 'UPI', 'Card', 'Bank Transfer', 'Cheque', 'Other'];
 const inr = (n) => '₹' + Number(n || 0).toLocaleString('en-IN');
@@ -17,13 +17,16 @@ const STATUS_META = {
 
 const calcFee = (fee, batchFee = 0) => {
   // A student's total is their own override if set, otherwise the batch fee.
-  const total = fee?.totalFee ? Number(fee.totalFee) : Number(batchFee || 0);
+  // feeSet = this student has their OWN agreed total. If not, we fall back to
+  // the batch default, so their total (and the Expected KPI) is provisional.
+  const feeSet = Number(fee?.totalFee || 0) > 0;
+  const total = feeSet ? Number(fee.totalFee) : Number(batchFee || 0);
   const paid = (fee?.payments || []).reduce((a, p) => a + Number(p.amount || 0), 0);
   const balance = total - paid;
   const pct = total > 0 ? Math.min(100, Math.round((paid / total) * 100)) : (paid > 0 ? 100 : 0);
   const status = total > 0 && paid >= total ? 'paid' : paid > 0 ? 'partial' : 'unpaid';
   const overdue = balance > 0.01 && fee?.dueDate && fee.dueDate < todayStr();
-  return { total, paid, balance, pct, status, overdue };
+  return { total, paid, balance, pct, status, overdue, feeSet };
 };
 
 // Circular progress ring — the signature element of each student card.
@@ -60,6 +63,7 @@ export default function Fees() {
 
   // Fee editor modal
   const [feeStudent, setFeeStudent] = useState(null);
+  const [feeCtx, setFeeCtx] = useState({ batchId: '', batchName: '', batchFee: 0 });
   const [draftTotal, setDraftTotal] = useState('');
   const [draftDue, setDraftDue] = useState('');
   const [draftPayments, setDraftPayments] = useState([]);
@@ -75,27 +79,41 @@ export default function Fees() {
     }).catch(() => {});
   }, []);
 
-  const loadBatch = async (bid) => {
-    if (!bid) { setRows([]); return; }
-    setLoading(true);
+  // Load one batch (or every batch when bid === 'ALL'). Each row carries its
+  // own batch name + default fee so per-student totals are correct across batches.
+  const loadOneBatch = async (b) => {
     const [studentsRes, fees] = await Promise.all([
-      getBatchStudents(bid, scope).catch(() => ({ students: [] })),
-      getFeesByBatch(bid, scope).catch(() => []),
+      getBatchStudents(b.id, scope).catch(() => ({ students: [] })),
+      getFeesByBatch(b.id, scope).catch(() => []),
     ]);
     const feeMap = {};
     fees.forEach(f => { feeMap[f.studentId || f.id] = f; });
-    const merged = (studentsRes.students || []).map(s => ({
+    return (studentsRes.students || []).map(s => ({
       student: s,
       fee: feeMap[s.id] || { studentId: s.id, totalFee: 0, payments: [] },
+      batchId: b.id,
+      batchName: b.name || '',
+      batchFee: Number(b.courseFee || 0),
     }));
+  };
+  const loadBatch = async (bid) => {
+    if (!bid) { setRows([]); return; }
+    setLoading(true);
+    let merged = [];
+    if (bid === 'ALL') {
+      const chunks = await Promise.all(batches.map(b => loadOneBatch(b)));
+      merged = chunks.flat();
+    } else {
+      const b = batches.find(x => x.id === bid);
+      if (b) merged = await loadOneBatch(b);
+    }
     setRows(merged);
     setLoading(false);
   };
-  useEffect(() => { loadBatch(batchId); /* eslint-disable-next-line */ }, [batchId]);
+  useEffect(() => { loadBatch(batchId); /* eslint-disable-next-line */ }, [batchId, batches]);
 
+  const isAllBatches = batchId === 'ALL';
   const batch = batches.find(b => b.id === batchId);
-  const batchName = batch?.name || '';
-  const batchFee = Number(batch?.courseFee || 0);
   // Keep the batch-fee input in sync when the selected batch changes.
   useEffect(() => { setBatchFeeInput(batch?.courseFee ? String(batch.courseFee) : ''); }, [batchId, batch?.courseFee]);
 
@@ -114,29 +132,33 @@ export default function Fees() {
   };
 
   // KPIs across the whole batch
-  const kpi = rows.reduce((a, { fee }) => {
-    const c = calcFee(fee, batchFee);
+  const kpi = rows.reduce((a, row) => {
+    const c = calcFee(row.fee, row.batchFee);
     a.expected += c.total; a.collected += c.paid;
     if (c.status === 'paid') a.paidCount++;
     if (c.overdue) a.overdue++;
+    if (!c.feeSet) a.notSet++;
     return a;
-  }, { expected: 0, collected: 0, paidCount: 0, overdue: 0 });
+  }, { expected: 0, collected: 0, paidCount: 0, overdue: 0, notSet: 0 });
   const outstanding = kpi.expected - kpi.collected;
   const rate = kpi.expected > 0 ? Math.round((kpi.collected / kpi.expected) * 100) : 0;
 
-  const filtered = rows.filter(({ student, fee }) => {
-    const { status } = calcFee(fee, batchFee);
-    if (statusFilter && status !== statusFilter) return false;
+  const filtered = rows.filter(({ student, fee, batchFee: rBatchFee, batchName: rBatchName }) => {
+    const c = calcFee(fee, rBatchFee);
+    if (statusFilter === 'notset') { if (c.feeSet) return false; }
+    else if (statusFilter && c.status !== statusFilter) return false;
     if (!search) return true;
     const q = search.toLowerCase();
-    return student.name?.toLowerCase().includes(q) || (student.phone || '').includes(search);
+    return student.name?.toLowerCase().includes(q) || (student.phone || '').includes(search) || (rBatchName || '').toLowerCase().includes(q);
   });
 
   // ── Fee editor ────────────────────────────────────────────────
-  const openFee = ({ student, fee }) => {
+  const openFee = (row) => {
+    const { student, fee } = row;
     setFeeStudent(student);
-    // Default a new student's total to the batch fee (editable per student).
-    setDraftTotal(fee.totalFee ? String(fee.totalFee) : (batchFee ? String(batchFee) : ''));
+    setFeeCtx({ batchId: row.batchId || student.batchId || '', batchName: row.batchName || '', batchFee: Number(row.batchFee || 0) });
+    // Default a new student's total to their batch fee (editable per student).
+    setDraftTotal(fee.totalFee ? String(fee.totalFee) : (row.batchFee ? String(row.batchFee) : ''));
     setDraftDue(fee.dueDate || '');
     setDraftPayments([...(fee.payments || [])]);
     setPayForm({ amount: '', date: todayStr(), method: 'Cash', note: '' });
@@ -168,8 +190,8 @@ export default function Fees() {
     const payload = {
       studentId: feeStudent.id,
       studentName: feeStudent.name || '',
-      batchId,
-      batchName,
+      batchId: feeCtx.batchId || feeStudent.batchId || '',
+      batchName: feeCtx.batchName || '',
       totalFee: Number(draftTotal || 0),
       dueDate: draftDue || '',
       payments: draftPayments,
@@ -218,9 +240,10 @@ export default function Fees() {
       <div className="mobile-stack" style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
         <select className="form-input" style={{ width: 'auto', minWidth: 200, height: 40 }} value={batchId} onChange={e => setBatchId(e.target.value)}>
           <option value="">Select a batch…</option>
+          <option value="ALL">All batches ({batches.length})</option>
           {batches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
         </select>
-        {batchId && (
+        {batchId && !isAllBatches && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 9, padding: '4px 6px 4px 12px' }}
             title="Default fee for this batch — students without a custom fee inherit it">
             <span style={{ fontSize: 12, color: 'var(--muted)', fontWeight: 600, whiteSpace: 'nowrap' }}>Batch fee ₹</span>
@@ -237,7 +260,7 @@ export default function Fees() {
             value={search} onChange={e => setSearch(e.target.value)} />
         </div>
         <div style={{ display: 'flex', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 9, padding: 3 }}>
-          {[{ k: '', l: 'All' }, { k: 'unpaid', l: 'Unpaid' }, { k: 'partial', l: 'Partial' }, { k: 'paid', l: 'Paid' }].map(f => (
+          {[{ k: '', l: 'All' }, { k: 'unpaid', l: 'Unpaid' }, { k: 'partial', l: 'Partial' }, { k: 'paid', l: 'Paid' }, { k: 'notset', l: 'Not set' }].map(f => (
             <span key={f.k} onClick={() => setStatusFilter(f.k)}
               style={{ padding: '6px 13px', borderRadius: 7, fontSize: 12.5, fontWeight: 600, cursor: 'pointer',
                 background: statusFilter === f.k ? 'var(--accent-50)' : 'transparent',
@@ -248,7 +271,9 @@ export default function Fees() {
 
       {/* KPI band */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 12, marginBottom: 18 }}>
-        <KPI label="Expected" value={inr(kpi.expected)} sub={`${rows.length} students`} color="var(--info)" bg="var(--blue-soft)" icon={Wallet} />
+        <KPI label={kpi.notSet ? 'Expected (provisional)' : 'Expected'} value={inr(kpi.expected)}
+          sub={kpi.notSet ? `${kpi.notSet} of ${rows.length} fees not set` : `${rows.length} students`}
+          color="var(--info)" bg="var(--blue-soft)" icon={Wallet} />
         <KPI label="Collected" value={inr(kpi.collected)} sub={`${rate}% collected`} color="var(--green-ink)" bg="var(--pos-50)" icon={CheckCircle} />
         <KPI label="Outstanding" value={inr(outstanding)} sub={kpi.overdue ? `${kpi.overdue} overdue` : 'On track'} color="var(--red-ink)" bg="var(--neg-50)" icon={TrendingUp} />
         <KPI label="Fully Paid" value={`${kpi.paidCount}/${rows.length}`} sub="students cleared" color="var(--accent-ink)" bg="var(--accent-50)" icon={CheckCircle} />
@@ -258,16 +283,17 @@ export default function Fees() {
         <div className="card" style={{ textAlign: 'center', padding: 48, color: 'var(--muted)' }}>Select a batch to view its fees.</div>
       ) : filtered.length === 0 ? (
         <div className="card" style={{ textAlign: 'center', padding: 48, color: 'var(--muted)' }}>
-          {rows.length === 0 ? 'No students in this batch yet.' : 'No students match your filter.'}
+          {rows.length === 0 ? (isAllBatches ? 'No students in any batch yet.' : 'No students in this batch yet.') : 'No students match your filter.'}
         </div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(300px,1fr))', gap: 14 }}>
-          {filtered.map(({ student, fee }) => {
-            const c = calcFee(fee, batchFee);
+          {filtered.map((row) => {
+            const { student, fee } = row;
+            const c = calcFee(fee, row.batchFee);
             const meta = STATUS_META[c.status];
             return (
               <div key={student.id} className="card" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12, cursor: 'pointer', transition: 'box-shadow .15s' }}
-                onClick={() => openFee({ student, fee })}
+                onClick={() => openFee(row)}
                 onMouseEnter={e => e.currentTarget.style.boxShadow = 'var(--shadow-md)'}
                 onMouseLeave={e => e.currentTarget.style.boxShadow = ''}>
                 <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
@@ -275,8 +301,14 @@ export default function Fees() {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 14.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{student.name || '—'}</div>
                     <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{student.phone || '—'}</div>
+                    <div style={{ fontSize: 11.5, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4, marginTop: 1 }}>
+                      <School size={11} style={{ flexShrink: 0 }} />{row.batchName || '—'}
+                    </div>
                     <div style={{ display: 'flex', gap: 6, marginTop: 5, flexWrap: 'wrap' }}>
                       <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 9px', borderRadius: 20, color: meta.c, background: meta.bg }}>{meta.label}</span>
+                      {!c.feeSet && <span title={row.batchFee ? `Using the batch default (${inr(row.batchFee)}). Set this student's own fee to make it final.` : 'No fee set for this student yet.'}
+                        style={{ fontSize: 11, fontWeight: 700, padding: '2px 9px', borderRadius: 20, color: 'var(--text-muted)', background: 'var(--surface-sunken)', display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                        {row.batchFee ? 'Default fee' : 'Fee not set'}</span>}
                       {c.overdue && <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 9px', borderRadius: 20, color: 'var(--red-ink)', background: 'var(--neg-50)', display: 'inline-flex', alignItems: 'center', gap: 3 }}><AlertTriangle size={11} />Overdue</span>}
                     </div>
                   </div>
@@ -294,7 +326,7 @@ export default function Fees() {
 
       {/* Fee editor modal */}
       {feeStudent && (
-        <Modal title={`Fees — ${feeStudent.name || 'Student'}`} onClose={closeFee} wide persistent>
+        <Modal title={`Fees — ${feeStudent.name || 'Student'}${feeCtx.batchName ? ` · ${feeCtx.batchName}` : ''}`} onClose={closeFee} wide persistent>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             {/* Totals summary */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10 }}>
