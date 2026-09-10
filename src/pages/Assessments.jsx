@@ -671,7 +671,7 @@ export default function Assessments({ filterBatchId = null }) {
                           onChange={() => toggleConductingStaff({ uid: s.id, name: s.name, phone: s.phone||'', email: s.email||'' })}/>
                         <div style={{ flex:1, minWidth:0 }}>
                           <div style={{ fontSize:13, fontWeight:500 }}>{s.name}</div>
-                          <div style={{ fontSize:11, color:'var(--text-muted)' }}>{s.phone || 'no phone'}{s.role ? ` · ${s.role}` : ''}</div>
+                          <div style={{ fontSize:11, color:'var(--text-muted)' }}>{s.phone || 'no phone'}{s.access === 'admin' ? ' · admin/staff' : (s.role ? ` · ${s.role}` : '')}</div>
                         </div>
                       </label>
                     );

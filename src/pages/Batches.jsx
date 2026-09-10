@@ -2356,7 +2356,7 @@ export default function Batches() {
                   <input type="checkbox" readOnly checked={selectedStaffIds.includes(s.id)} style={{ marginRight:4 }}/>
                   <div>
                     <div style={{ fontWeight:600, fontSize:13 }}>{s.name} ({s.phone || 'no phone'})</div>
-                    <div style={{ fontSize:11, color:'#9CA3AF' }}>{s.role}</div>
+                    <div style={{ fontSize:11, color:'#9CA3AF' }}>{s.access === 'admin' ? 'admin/staff' : s.role}</div>
                   </div>
                 </div>
               ))}

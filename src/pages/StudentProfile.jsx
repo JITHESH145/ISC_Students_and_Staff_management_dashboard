@@ -64,6 +64,25 @@ const isDisplayableValue = (v) =>
   (typeof v === 'number' && !Number.isNaN(v)) ||
   typeof v === 'boolean';
 
+// Fallback student fields (mirrors Batches' DEFAULT_STUDENT_FIELDS) used by the
+// edit form when a batch has no custom studentFields, so Add and Edit match.
+const DEFAULT_STUDENT_FIELDS = [
+  { key: 'fatherName',    label: 'Name of Father',            required: false, type: 'text'  },
+  { key: 'motherName',    label: 'Name of Mother',            required: false, type: 'text'  },
+  { key: 'email',         label: 'Email',                     required: false, type: 'email' },
+  { key: 'address',       label: 'Address',                   required: false, type: 'text'  },
+  { key: 'phone',         label: 'Phone Number',              required: true,  type: 'text'  },
+  { key: 'whatsappNumber',label: 'Whatsapp Number',           required: false, type: 'text'  },
+  { key: 'occupation',    label: 'Occupation',                required: false, type: 'text'  },
+  { key: 'name',          label: "Kids Name",                 required: true,  type: 'text'  },
+  { key: 'gender',        label: 'Gender',                    required: false, type: 'text'  },
+  { key: 'age',           label: 'Age',                       required: false, type: 'number'},
+  { key: 'classStd',      label: 'Class',                     required: false, type: 'text'  },
+  { key: 'schoolName',    label: 'School Name',               required: false, type: 'text'  },
+  { key: 'varkResult',    label: 'VARK Learning Style',       required: false, type: 'text'  },
+  { key: 'syllabus',      label: 'Syllabus (CBSE/STATE/ICSE)',required: false, type: 'text'  },
+];
+
 export default function StudentProfile() {
   const { id }       = useParams();
   const navigate     = useNavigate();
@@ -1088,59 +1107,44 @@ export default function StudentProfile() {
       {editModal && (
         <Modal title="Edit Student Profile" onClose={() => setEditModal(false)} wide persistent>
           <form onSubmit={handleEdit} style={{ display:'flex', flexDirection:'column', gap:12 }}>
-            <FormRow>
-              <div className="form-group"><label className="form-label">Name</label><input className="form-input" value={editForm.name||''} onChange={e=>setEditForm({...editForm,name:e.target.value})}/></div>
-              <div className="form-group"><label className="form-label">Phone</label><input className="form-input" value={editForm.phone||''} onChange={e=>setEditForm({...editForm,phone:e.target.value})}/></div>
-            </FormRow>
-            <FormRow>
-              <div className="form-group"><label className="form-label">Email</label><input className="form-input" value={editForm.email||''} onChange={e=>setEditForm({...editForm,email:e.target.value})}/></div>
-              <div className="form-group"><label className="form-label">WhatsApp Number</label><input className="form-input" value={editForm.whatsappNumber||''} onChange={e=>setEditForm({...editForm,whatsappNumber:e.target.value})}/></div>
-            </FormRow>
-            <FormRow>
-              <div className="form-group"><label className="form-label">Father's Name</label><input className="form-input" value={editForm.fatherName||''} onChange={e=>setEditForm({...editForm,fatherName:e.target.value})}/></div>
-              <div className="form-group"><label className="form-label">Mother's Name</label><input className="form-input" value={editForm.motherName||''} onChange={e=>setEditForm({...editForm,motherName:e.target.value})}/></div>
-            </FormRow>
-            <FormRow>
-              <div className="form-group"><label className="form-label">Parent Name</label><input className="form-input" value={editForm.parentName||''} onChange={e=>setEditForm({...editForm,parentName:e.target.value})}/></div>
-              <div className="form-group"><label className="form-label">Parent Phone</label><input className="form-input" value={editForm.parentPhone||''} onChange={e=>setEditForm({...editForm,parentPhone:e.target.value})}/></div>
-            </FormRow>
-            <FormRow>
-              <div className="form-group"><label className="form-label">School Name</label><input className="form-input" value={editForm.schoolName||''} onChange={e=>setEditForm({...editForm,schoolName:e.target.value})}/></div>
-              <div className="form-group"><label className="form-label">Occupation</label><input className="form-input" value={editForm.occupation||''} onChange={e=>setEditForm({...editForm,occupation:e.target.value})}/></div>
-            </FormRow>
-            <div className="form-group"><label className="form-label">Address</label><textarea className="form-input" rows={2} value={editForm.address||''} onChange={e=>setEditForm({...editForm,address:e.target.value})}/></div>
-            <FormRow>
-              <div className="form-group"><label className="form-label">Gender</label>
-                <select className="form-input" value={editForm.gender||''} onChange={e=>setEditForm({...editForm,gender:e.target.value})}>
-                  <option value="">Select</option>{['Girl','Boy','Other'].map(g=><option key={g} value={g}>{g}</option>)}
-                </select>
+            {/* Student details — same fields as the batch's Add Student form,
+                so Add and Edit stay in sync with the batch's student flow. */}
+            <div className="mobile-1col" style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+              {((batchFields && batchFields.length) ? batchFields : DEFAULT_STUDENT_FIELDS).map(f => (
+                <div key={f.key} className="form-group">
+                  <label className="form-label">{f.label}{f.required ? ' *' : ''}</label>
+                  {f.type === 'select' ? (
+                    <select className="form-input" required={f.required} value={editForm[f.key] ?? ''} onChange={e=>setEditForm({...editForm,[f.key]:e.target.value})}>
+                      <option value="">Select</option>
+                      {(f.options||[]).map(o=><option key={o} value={o}>{o}</option>)}
+                    </select>
+                  ) : f.key === 'address' ? (
+                    <textarea className="form-input" rows={2} value={editForm[f.key] ?? ''} onChange={e=>setEditForm({...editForm,[f.key]:e.target.value})}/>
+                  ) : (
+                    <input className="form-input" type={f.type||'text'} required={f.required} value={editForm[f.key] ?? ''} onChange={e=>setEditForm({...editForm,[f.key]:e.target.value})}/>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* Enrollment / operational fields (edit-only) */}
+            <div style={{ borderTop:'1px solid var(--border)', paddingTop:12, marginTop:2 }}>
+              <div style={{ fontSize:11, fontWeight:700, color:'var(--text-muted)', textTransform:'uppercase', letterSpacing:'.05em', marginBottom:10 }}>Enrollment</div>
+              <div className="mobile-1col" style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+                <div className="form-group"><label className="form-label">Join Date *</label><input className="form-input" type="date" required value={editForm.joinDate||''} onChange={e=>setEditForm({...editForm,joinDate:e.target.value})}/></div>
+                <div className="form-group"><label className="form-label">Course Duration (months)</label><input className="form-input" type="number" value={editForm.courseDurationMonths||''} onChange={e=>setEditForm({...editForm,courseDurationMonths:e.target.value})}/></div>
+                <div className="form-group"><label className="form-label">Status</label>
+                  <select className="form-input" value={editForm.status||'active'} onChange={e=>setEditForm({...editForm,status:e.target.value})}>
+                    {['active','moderate','at-risk','dropped'].map(s=><option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                <div className="form-group"><label className="form-label">Staff Assigned</label>
+                  <select className="form-input" value={editForm.staffAssigned||''} onChange={e=>setEditForm({...editForm,staffAssigned:e.target.value})}>
+                    <option value="">Select</option>{staffList.filter(s=>s.active!==false).map(s=><option key={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
               </div>
-              <div className="form-group"><label className="form-label">Age</label><input className="form-input" type="number" value={editForm.age||''} onChange={e=>setEditForm({...editForm,age:e.target.value})}/></div>
-            </FormRow>
-            <FormRow>
-              <div className="form-group"><label className="form-label">Syllabus</label><input className="form-input" value={editForm.syllabus||''} onChange={e=>setEditForm({...editForm,syllabus:e.target.value})}/></div>
-              <div className="form-group"><label className="form-label">Class / Std</label><input className="form-input" value={editForm.classStd||''} onChange={e=>setEditForm({...editForm,classStd:e.target.value})}/></div>
-            </FormRow>
-            <FormRow>
-              <div className="form-group"><label className="form-label">Status</label>
-                <select className="form-input" value={editForm.status||'active'} onChange={e=>setEditForm({...editForm,status:e.target.value})}>
-                  {['active','moderate','at-risk','dropped'].map(s=><option key={s} value={s}>{s}</option>)}
-                </select>
-              </div>
-            </FormRow>
-            <FormRow>
-              <div className="form-group"><label className="form-label">Join Date</label><input className="form-input" type="date" value={editForm.joinDate||''} onChange={e=>setEditForm({...editForm,joinDate:e.target.value})}/></div>
-              <div className="form-group"><label className="form-label">Course Duration (months)</label><input className="form-input" type="number" value={editForm.courseDurationMonths||''} onChange={e=>setEditForm({...editForm,courseDurationMonths:e.target.value})}/></div>
-            </FormRow>
-            <FormRow>
-              <div className="form-group"><label className="form-label">Staff Assigned</label>
-                <select className="form-input" value={editForm.staffAssigned||''} onChange={e=>setEditForm({...editForm,staffAssigned:e.target.value})}>
-                  <option value="">Select</option>{staffList.filter(s=>s.active!==false).map(s=><option key={s.id}>{s.name}</option>)}
-                </select>
-              </div>
-              <div className="form-group"><label className="form-label">ClassPlus ID</label><input className="form-input" value={editForm.classplusId||''} onChange={e=>setEditForm({...editForm,classplusId:e.target.value})}/></div>
-            </FormRow>
-            <div className="form-group"><label className="form-label">Notes</label><textarea className="form-input" rows={2} value={editForm.notes||''} onChange={e=>setEditForm({...editForm,notes:e.target.value})}/></div>
+            </div>
             <div style={{ display:'flex', gap:10, justifyContent:'flex-end' }}>
               <button type="button" className="btn btn-ghost" onClick={() => setEditModal(false)}>Cancel</button>
               <button type="submit" className="btn btn-primary" disabled={savingEdit}>{savingEdit?'Saving...':'Save Changes'}</button>
@@ -1175,7 +1179,7 @@ export default function StudentProfile() {
                       checked={assessForm.conductingStaffIds.includes(s.id)}
                       onChange={() => toggleConductingStaff(s.id)} />
                     <span style={{ flex: 1 }}>{s.name}</span>
-                    <span style={{ fontSize: 11, color: '#9CA3AF' }}>{s.role}</span>
+                    <span style={{ fontSize: 11, color: '#9CA3AF' }}>{s.access === 'admin' ? 'admin/staff' : s.role}</span>
                   </label>
                 ))}
                 {staffList.filter(s => s.active !== false).length === 0 && (

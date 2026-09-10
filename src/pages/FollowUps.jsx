@@ -255,7 +255,7 @@ export default function FollowUps() {
               <select className="form-input" required value={form.staffId}
                 onChange={e => setForm({ ...form, staffId: e.target.value })}>
                 <option value="">Select staff member</option>
-                {staff.filter(s=>s.active!==false).map(s => <option key={s.id} value={s.id}>{s.name} — {s.role}</option>)}
+                {staff.filter(s=>s.active!==false).map(s => <option key={s.id} value={s.id}>{s.name} — {s.access === 'admin' ? 'admin/staff' : s.role}</option>)}
               </select>
               {form.staffId && (
                 <div style={{ fontSize: 11, color: '#6B7280', marginTop: 4 }}>

@@ -275,7 +275,7 @@ export default function Concerns() {
                     <option key={s.id} value={s.id}>⭐ {s.name} (CEO)</option>
                   ))}
                   {staffList.filter(s => s.role !== 'ceo' && s.active !== false).map(s => (
-                    <option key={s.id} value={s.id}>{s.name} ({s.role})</option>
+                    <option key={s.id} value={s.id}>{s.name} ({s.access === 'admin' ? 'admin/staff' : s.role})</option>
                   ))}
                 </select>
                 {form.assignedTo && (
