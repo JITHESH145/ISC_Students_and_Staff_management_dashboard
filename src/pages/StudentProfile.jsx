@@ -6,7 +6,8 @@ import {
   getStaffProfiles, updateWeakSubjects, updateCourseFlowStep, addNotification,
   getStudentReports, getStudentAttendanceSummary, getBatchTasks,
   getStudentBatchAssessments,
-  saveClassReport, updateClassReport, deleteClassReport
+  saveClassReport, updateClassReport, deleteClassReport,
+  saveAssessmentResults
 } from '../firebase/services';
 import { Modal, Toast, Avatar, StatusBadge, Loading, FormRow, Confirm } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
@@ -100,6 +101,9 @@ export default function StudentProfile() {
   // Assessment modal
   const [assessModal, setAssessModal] = useState(false);
   const [assessForm,  setAssessForm]  = useState({ testName:'', subject:'', date:'', marks:'', totalMarks:'', conductingStaffIds:[] });
+  const [markModal,   setMarkModal]   = useState(null); // batch assessment awaiting this student's mark
+  const [markInput,   setMarkInput]   = useState('');
+  const [savingMark,  setSavingMark]  = useState(false);
 
   // Follow-up note
   const [newNote,    setNewNote]    = useState('');
@@ -243,6 +247,34 @@ export default function StudentProfile() {
     setEditModal(false);
     load();
     setSavingEdit(false);
+  };
+
+  // Enter this student's mark for a batch assessment they haven't been graded on.
+  const openMark = (a) => { setMarkModal(a); setMarkInput(''); };
+  const saveMark = async () => {
+    if (!markModal) return;
+    const m = Number(markInput);
+    const tot = Number(markModal.totalMarks || 0);
+    if (markInput === '' || Number.isNaN(m) || m < 0) { setToast({ message: 'Enter a valid mark.', type: 'error' }); return; }
+    setSavingMark(true);
+    try {
+      await saveAssessmentResults([{
+        assessmentId: markModal.id,
+        assessmentTitle: markModal.title || markModal.testName || 'Assessment',
+        batchId: markModal.batchId || '',
+        studentId: id,
+        studentName: student?.name || '',
+        marks: m, marksScored: m, totalMarks: tot,
+        percentage: tot > 0 ? Math.round((m / tot) * 100 * 10) / 10 : 0,
+        pass: m >= tot * 0.4,
+      }]);
+      setToast({ message: 'Mark saved.', type: 'success' });
+      setMarkModal(null);
+      load();
+    } catch {
+      setToast({ message: 'Could not save the mark.', type: 'error' });
+    }
+    setSavingMark(false);
   };
 
   // Save assessment
@@ -598,17 +630,25 @@ export default function StudentProfile() {
                     </span>
                   )}
                 </div>
-                {assessments.map((a, i) => (
-                  <div key={a.id} style={{ marginBottom:10 }}>
-                    <div style={{ display:'flex', justifyContent:'space-between', fontSize:12, marginBottom:3 }}>
-                      <span>{a.testName} {a.subject && `(${a.subject})`}</span>
-                      <span style={{ fontWeight:700, color:a.percentage>=60?'#10B981':a.percentage>=40?'#F59E0B':'#EF4444' }}>{a.percentage}%</span>
+                {assessments.map((a) => {
+                  const graded = a.percentage != null && a.marks != null;
+                  const nm = a.testName || a.title || a.subject || 'Assessment';
+                  return (
+                    <div key={a.id} style={{ marginBottom:10 }}>
+                      <div style={{ display:'flex', justifyContent:'space-between', fontSize:12, marginBottom:3 }}>
+                        <span>{nm} {a.subject && a.testName && `(${a.subject})`}</span>
+                        {graded
+                          ? <span style={{ fontWeight:700, color:a.percentage>=60?'#10B981':a.percentage>=40?'#F59E0B':'#EF4444' }}>{a.percentage}%</span>
+                          : <span style={{ fontSize:11, fontWeight:600, color:'#9CA3AF' }}>Marks not entered</span>}
+                      </div>
+                      {graded && (
+                        <div className="progress-bar">
+                          <div className="progress-fill" style={{ width:`${a.percentage}%`, background:a.percentage>=60?'#10B981':a.percentage>=40?'#F59E0B':'#EF4444' }}/>
+                        </div>
+                      )}
                     </div>
-                    <div className="progress-bar">
-                      <div className="progress-fill" style={{ width:`${a.percentage}%`, background:a.percentage>=60?'#10B981':a.percentage>=40?'#F59E0B':'#EF4444' }}/>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
 
@@ -750,7 +790,7 @@ export default function StudentProfile() {
                   return (
                     <tr key={a.id}>
                       <td style={{ color:'#9CA3AF' }}>{i+1}</td>
-                      <td style={{ fontWeight:500 }}>{a.testName}</td>
+                      <td style={{ fontWeight:500 }}>{a.testName || a.title || '—'}</td>
                       <td>{a.subject||'—'}</td>
                       <td style={{ fontSize:12, color:'#6B7280' }}>{a.date||'—'}</td>
                       <td>{graded ? `${a.marks}/${a.totalMarks}` : <span style={{ color:'#9CA3AF' }}>— / {a.totalMarks}</span>}</td>
@@ -762,6 +802,8 @@ export default function StudentProfile() {
                             </div>
                             <span style={{ fontSize:13, fontWeight:600, color:a.percentage>=60?'#10B981':a.percentage>=40?'#F59E0B':'#EF4444' }}>{a.percentage}%</span>
                           </div>
+                        ) : (a.batchId && !a.studentId) ? (
+                          <button className="btn btn-sm btn-primary" onClick={() => openMark(a)}>Enter mark</button>
                         ) : (
                           <span className="badge badge-amber">{a.status === 'completed' ? 'Not marked' : 'Upcoming'}</span>
                         )}
@@ -1258,6 +1300,28 @@ export default function StudentProfile() {
           </Modal>
         );
       })()}
+
+      {markModal && (
+        <Modal title={`Enter mark — ${markModal.title || markModal.testName || 'Assessment'}`} onClose={() => setMarkModal(null)} persistent>
+          <div style={{ fontSize:13, color:'var(--text-muted)', marginBottom:12 }}>
+            {student?.name} · out of {markModal.totalMarks} marks{markModal.date ? ` · ${markModal.date}` : ''}
+          </div>
+          <div className="form-group">
+            <label className="form-label">Marks Scored *</label>
+            <input className="form-input" type="number" min="0" max={markModal.totalMarks || undefined} autoFocus
+              value={markInput} onChange={e => setMarkInput(e.target.value)}/>
+          </div>
+          {markInput !== '' && Number(markModal.totalMarks) > 0 && (
+            <div style={{ fontSize:12.5, color:'var(--text-muted)', marginTop:4 }}>
+              Percentage: <strong>{Math.round(Number(markInput) / Number(markModal.totalMarks) * 100)}%</strong>
+            </div>
+          )}
+          <div style={{ display:'flex', gap:10, justifyContent:'flex-end', marginTop:16 }}>
+            <button className="btn btn-ghost" onClick={() => setMarkModal(null)}>Cancel</button>
+            <button className="btn btn-primary" onClick={saveMark} disabled={savingMark}>{savingMark ? 'Saving…' : 'Save Mark'}</button>
+          </div>
+        </Modal>
+      )}
 
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)}/>}
       {confirmBox && <Confirm message={confirmBox.message} confirmLabel={confirmBox.confirmLabel} onConfirm={confirmBox.onConfirm} onCancel={() => setConfirmBox(null)}/>}

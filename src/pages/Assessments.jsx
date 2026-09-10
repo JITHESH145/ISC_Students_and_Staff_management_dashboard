@@ -67,6 +67,7 @@ export default function Assessments({ filterBatchId = null }) {
   // Filters
   const [filterBatch,   setFilterBatch]   = useState(filterBatchId || '');
   const [filterStatus,  setFilterStatus]  = useState('');
+  const [filterDate,    setFilterDate]    = useState('');
   const [searchTitle,   setSearchTitle]   = useState('');
   const [filterScope,   setFilterScope]   = useState('all'); // 'all' | 'batch' | 'student'
 
@@ -142,13 +143,23 @@ export default function Assessments({ filterBatchId = null }) {
   useEffect(() => { load(); }, [filterBatchId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Derived list ──────────────────────────────────────────────
+  // Student-profile assessments store the name in `testName`; batch ones use
+  // `title`. Show/search either.
+  const assessName = (a) => a.title || a.testName || a.subject || '';
+  const sortKey = (a) => a.date || (a.createdAt?.seconds ? new Date(a.createdAt.seconds * 1000).toISOString().slice(0, 10) : '');
   const visible = assessments.filter(a => {
     if (filterBatch  && a.batchId !== filterBatch)                              return false;
     if (filterStatus && a.status  !== filterStatus)                             return false;
-    if (searchTitle  && !a.title?.toLowerCase().includes(searchTitle.toLowerCase())) return false;
+    if (filterDate   && a.date    !== filterDate)                               return false;
+    if (searchTitle  && !assessName(a).toLowerCase().includes(searchTitle.toLowerCase())) return false;
     if (filterScope === 'batch'   && a.studentId)                               return false;
     if (filterScope === 'student' && !a.studentId)                              return false;
     return true;
+  }).sort((a, b) => {
+    // Latest first (by date, then by creation time as a tiebreaker).
+    const d = (sortKey(b) || '').localeCompare(sortKey(a) || '');
+    if (d !== 0) return d;
+    return (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0);
   });
 
   // ── Create ────────────────────────────────────────────────────
@@ -218,7 +229,10 @@ export default function Assessments({ filterBatchId = null }) {
     setBatchStudents([]);
     setManualMarks({});
     setManualSearch('');
-    if (assessment.batchId) {
+    if (assessment.studentId) {
+      // Student-profile assessment: marks are for this one student only.
+      setBatchStudents([{ id: assessment.studentId, name: assessment.studentName || 'Student', phone: assessment.studentPhone || '' }]);
+    } else if (assessment.batchId) {
       try {
         const res = await getBatchStudents(assessment.batchId, { role: profile?.role, uid: profile?.uid });
         // if the assessment targeted specific students, restrict to those
@@ -470,6 +484,11 @@ export default function Assessments({ filterBatchId = null }) {
           <option value="upcoming">Upcoming</option>
           <option value="completed">Completed</option>
         </select>
+        <div style={{ display:'flex', alignItems:'center', gap:6 }} title="Filter by assessment date">
+          <input type="date" className="form-input" style={{ height:36, width:'auto' }}
+            value={filterDate} onChange={e => setFilterDate(e.target.value)}/>
+          {filterDate && <button className="btn btn-ghost btn-sm" onClick={() => setFilterDate('')}>Clear</button>}
+        </div>
       </div>
 
       {/* Table */}
@@ -500,14 +519,27 @@ export default function Assessments({ filterBatchId = null }) {
               const myEntry = a.conductingStaff?.find(s => s.uid === profile?.uid);
               return (
                 <tr key={a.id}>
-                  <td style={{ fontWeight:600 }}>{a.title}</td>
+                  <td style={{ fontWeight:600 }}>{assessName(a) || '—'}</td>
                   <td>
-                    <span className={`badge ${a.studentId ? 'badge-violet' : 'badge-blue'}`} style={{ fontSize:10 }}>
-                      {a.studentId ? 'Student' : 'Batch'}
+                    <span className={`badge ${a.studentId ? 'badge-violet' : (a.participantType === 'specific' ? 'badge-violet' : 'badge-blue')}`} style={{ fontSize:10 }}>
+                      {a.studentId ? 'Student' : (a.participantType === 'specific' ? 'Specific' : 'Batch')}
                     </span>
                   </td>
                   <td style={{ color:'#6B7280', fontSize:12 }}>
-                    {a.studentId ? (a.studentName || '—') : (a.batchName || batchName(a.batchId))}
+                    {a.studentId
+                      ? (a.studentName || '—')
+                      : (
+                        <div>
+                          {a.batchName || batchName(a.batchId)}
+                          {a.participantType === 'specific' && a.participantStudents?.length > 0 && (
+                            <div style={{ fontSize:11, color:'var(--purple, #8B5CF6)', marginTop:2 }}>
+                              {a.participantStudents.length === 1
+                                ? a.participantStudents[0].name
+                                : `${a.participantStudents.length} specific students`}
+                            </div>
+                          )}
+                        </div>
+                      )}
                   </td>
                   <td style={{ color:'#6B7280' }}>{formatDate(a.date)}</td>
                   <td style={{ color:'#6B7280' }}>{a.totalMarks}</td>
@@ -561,8 +593,9 @@ export default function Assessments({ filterBatchId = null }) {
                       <button
                         className="btn btn-sm"
                         style={{ background:'#EDE9FE', color:'#6D28D9', border:'none' }}
+                        title="Enter marks manually or import a CSV"
                         onClick={() => openImport(a)}>
-                        <Upload size={12}/> Import
+                        <Upload size={12}/> Marks
                       </button>
                       {isCeo && (
                         <button
@@ -712,7 +745,7 @@ export default function Assessments({ filterBatchId = null }) {
 
       {/* ── Import Marks Modal ── */}
       {showImport && (
-        <Modal title={`Import Marks — ${showImport.title}`} onClose={() => setShowImport(null)} wide persistent>
+        <Modal title={`Marks — ${assessName(showImport) || 'Assessment'}`} onClose={() => setShowImport(null)} wide persistent>
           {/* Step indicator */}
           <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:20 }}>
             {[1,2,3].map(n => (
@@ -738,8 +771,8 @@ export default function Assessments({ filterBatchId = null }) {
             <div>
               <div style={{ padding:'12px 16px', background:'#EFF6FF', borderRadius:8, fontSize:13,
                 color:'#1E40AF', marginBottom:16, lineHeight:1.7 }}>
-                <strong>Assessment:</strong> {showImport.title}<br/>
-                <strong>Batch:</strong> {showImport.batchName || batchName(showImport.batchId)}<br/>
+                <strong>Assessment:</strong> {assessName(showImport)}<br/>
+                <strong>{showImport.studentId ? 'Student' : 'Batch'}:</strong> {showImport.studentId ? (showImport.studentName || '—') : (showImport.batchName || batchName(showImport.batchId))}<br/>
                 <strong>Total Marks:</strong> {showImport.totalMarks} &nbsp;|&nbsp;
                 <strong>Pass threshold:</strong> 40%
               </div>
