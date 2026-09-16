@@ -13,8 +13,7 @@ import {
 const ALL_SUBJECTS = [
   'Mathematics','Science','English','Hindi','Social Science',
   'Physics','Chemistry','Biology','Computer Science',
-  'Python','Data Science','Web Development','Machine Learning',
-  'Economics','Accountancy','Business Studies','Other'
+  'Malayalam','Other'
 ];
 
 const ROLE_INFO = {
@@ -47,6 +46,8 @@ export default function StaffManagement() {
   const [toast, setToast]             = useState(null);
   const [saving, setSaving]           = useState(false);
   const [editingSubjects, setEditingSubjects] = useState([]);
+  const [subjCustomInput, setSubjCustomInput] = useState('');
+  const [subjShowCustom,  setSubjShowCustom]  = useState(false);
   const [form, setForm] = useState({ name:'', email:'', role:'staff' });
   // Resend-setup-email cooldown: one active email at a time, counts down secs.
   const [resend, setResend] = useState(null); // { email, secs }
@@ -253,6 +254,8 @@ export default function StaffManagement() {
     await setDirectoryDoc(showSubjectModal.id, { ...showSubjectModal, subjects: editingSubjects });
     setToast({ message: `Subjects updated for ${showSubjectModal.name}!`, type:'success' });
     setShowSubjectModal(null);
+    setSubjShowCustom(false);
+    setSubjCustomInput('');
     load();
   };
 
@@ -260,6 +263,15 @@ export default function StaffManagement() {
     setEditingSubjects(prev =>
       prev.includes(sub) ? prev.filter(s => s !== sub) : [...prev, sub]
     );
+  };
+
+  const closeSubjectModal = () => { setShowSubjectModal(null); setSubjShowCustom(false); setSubjCustomInput(''); };
+  const addCustomSubject = () => {
+    const val = subjCustomInput.trim();
+    if (!val) return;
+    setEditingSubjects(prev => prev.includes(val) ? prev : [...prev, val]);
+    setSubjCustomInput('');
+    setSubjShowCustom(false);
   };
 
   const active  = staffList.filter(s => s.active !== false);
@@ -627,15 +639,15 @@ export default function StaffManagement() {
       {showSubjectModal && (
         <Modal
           title={`Assign Subjects — ${showSubjectModal.name}`}
-          onClose={() => setShowSubjectModal(null)}
+          onClose={closeSubjectModal}
           persistent
         >
           <div style={{ fontSize:13, color:'#6B7280', marginBottom:14 }}>
             Select all subjects this staff member handles.
             A staff can handle multiple subjects.
           </div>
-          <div style={{ display:'flex', flexWrap:'wrap', gap:8, marginBottom:18 }}>
-            {ALL_SUBJECTS.map(sub => (
+          <div style={{ display:'flex', flexWrap:'wrap', gap:8, marginBottom: subjShowCustom ? 10 : 18 }}>
+            {ALL_SUBJECTS.filter(sub => sub !== 'Other').map(sub => (
               <div
                 key={sub}
                 onClick={() => toggleSubject(sub)}
@@ -647,10 +659,36 @@ export default function StaffManagement() {
                   border:     `1px solid ${editingSubjects.includes(sub) ? '#3B82F6' : 'var(--border)'}`,
                 }}
               >
-                {editingSubjects.includes(sub) ? '' : ''}{sub}
+                {sub}
               </div>
             ))}
+            {/* Custom subjects already picked that aren't part of the base list */}
+            {editingSubjects.filter(sub => !ALL_SUBJECTS.includes(sub)).map(sub => (
+              <div key={sub} onClick={() => toggleSubject(sub)} title="Click to remove" style={{
+                padding:'6px 14px', borderRadius:20, fontSize:12,
+                cursor:'pointer', fontWeight:500, transition:'all .15s',
+                background:'#3B82F6', color:'#fff', border:'1px solid #3B82F6',
+              }}>
+                {sub} ✕
+              </div>
+            ))}
+            <div onClick={() => setSubjShowCustom(v => !v)} style={{
+              padding:'6px 14px', borderRadius:20, fontSize:12, cursor:'pointer', fontWeight:500,
+              background: subjShowCustom?'#DBEAFE':'var(--bg)',
+              color: subjShowCustom?'#1E40AF':'var(--muted)',
+              border:`1px dashed ${subjShowCustom?'#93C5FD':'var(--border)'}`,
+            }}>
+              + Other
+            </div>
           </div>
+          {subjShowCustom && (
+            <div style={{ display:'flex', gap:8, marginBottom:18 }}>
+              <input className="form-input" autoFocus placeholder="Type subject name…"
+                value={subjCustomInput} onChange={e => setSubjCustomInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCustomSubject(); } }} />
+              <button type="button" className="btn btn-primary btn-sm" onClick={addCustomSubject}>Add</button>
+            </div>
+          )}
           {editingSubjects.length > 0 && (
             <div style={{
               padding:'8px 12px', background:'#DBEAFE',
@@ -660,7 +698,7 @@ export default function StaffManagement() {
             </div>
           )}
           <div style={{ display:'flex', gap:10, justifyContent:'flex-end' }}>
-            <button className="btn btn-ghost" onClick={() => setShowSubjectModal(null)}>
+            <button className="btn btn-ghost" onClick={closeSubjectModal}>
               Cancel
             </button>
             <button className="btn btn-primary" onClick={handleSaveSubjects}>

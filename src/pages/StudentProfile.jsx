@@ -42,8 +42,7 @@ const PHASE_LABELS = {
 const ALL_SUBJECTS = [
   'Mathematics', 'Science', 'English', 'Hindi', 'Social Science',
   'Physics', 'Chemistry', 'Biology', 'Computer Science',
-  'Python', 'Data Science', 'Web Development', 'Machine Learning',
-  'Economics', 'Accountancy', 'Business Studies', 'Other'
+  'Malayalam', 'Other'
 ];
 
 // Keys already rendered in the curated contact grid above — skip these when
@@ -120,6 +119,7 @@ export default function StudentProfile() {
   // Assessment modal
   const [assessModal, setAssessModal] = useState(false);
   const [assessForm,  setAssessForm]  = useState({ testName:'', subject:'', date:'', marks:'', totalMarks:'', conductingStaffIds:[] });
+  const [assessSubjectOther, setAssessSubjectOther] = useState(false); // "Other" picked — typing a custom subject name
   const [markModal,   setMarkModal]   = useState(null); // batch assessment awaiting this student's mark
   const [markInput,   setMarkInput]   = useState('');
   const [savingMark,  setSavingMark]  = useState(false);
@@ -132,6 +132,8 @@ export default function StudentProfile() {
   const [weakModal,   setWeakModal]   = useState(false);
   const [weakSubjects,setWeakSubjects]= useState([]);
   const [savingWeak,  setSavingWeak]  = useState(false);
+  const [weakCustomInput, setWeakCustomInput] = useState('');
+  const [weakShowCustom,  setWeakShowCustom]  = useState(false);
 
   // Course flow
   const [flowExpanded, setFlowExpanded] = useState({ onboarding: true, course: false });
@@ -338,6 +340,7 @@ export default function StudentProfile() {
     setToast({ message: 'Assessment added!', type: 'success' });
     setAssessModal(false);
     setAssessForm({ testName:'', subject:'', date:'', marks:'', totalMarks:'', conductingStaffIds:[] });
+    setAssessSubjectOther(false);
     const upd = await getAssessments(id);
     setAssessments(upd);
   };
@@ -354,6 +357,15 @@ export default function StudentProfile() {
 
   const toggleWeak = (sub) => {
     setWeakSubjects(prev => prev.includes(sub) ? prev.filter(s => s !== sub) : [...prev, sub]);
+  };
+
+  const closeWeakModal = () => { setWeakModal(false); setWeakShowCustom(false); setWeakCustomInput(''); };
+  const addCustomWeakSubject = () => {
+    const val = weakCustomInput.trim();
+    if (!val) return;
+    setWeakSubjects(prev => prev.includes(val) ? prev : [...prev, val]);
+    setWeakCustomInput('');
+    setWeakShowCustom(false);
   };
 
   // ── Progress reports (add / edit / delete, independent of the calendar) ──
@@ -1175,9 +1187,18 @@ export default function StudentProfile() {
             <div className="form-group"><label className="form-label">Test Name *</label><input className="form-input" required value={assessForm.testName} onChange={e=>setAssessForm({...assessForm,testName:e.target.value})}/></div>
             <FormRow>
               <div className="form-group"><label className="form-label">Subject</label>
-                <select className="form-input" value={assessForm.subject} onChange={e=>setAssessForm({...assessForm,subject:e.target.value})}>
+                <select className="form-input" value={assessSubjectOther ? 'Other' : assessForm.subject}
+                  onChange={e => {
+                    const v = e.target.value;
+                    if (v === 'Other') { setAssessSubjectOther(true); setAssessForm(f => ({ ...f, subject:'' })); }
+                    else { setAssessSubjectOther(false); setAssessForm(f => ({ ...f, subject:v })); }
+                  }}>
                   <option value="">Select</option>{ALL_SUBJECTS.map(s=><option key={s}>{s}</option>)}
                 </select>
+                {assessSubjectOther && (
+                  <input className="form-input" style={{ marginTop:8 }} autoFocus placeholder="Type subject name…"
+                    value={assessForm.subject} onChange={e=>setAssessForm({...assessForm,subject:e.target.value})} />
+                )}
               </div>
               <div className="form-group"><label className="form-label">Date</label><input className="form-input" type="date" value={assessForm.date} onChange={e=>setAssessForm({...assessForm,date:e.target.value})}/></div>
             </FormRow>
@@ -1217,12 +1238,12 @@ export default function StudentProfile() {
 
       {/* Weak subjects */}
       {weakModal && (
-        <Modal title="Manage Weak Subjects" onClose={() => setWeakModal(false)} persistent>
+        <Modal title="Manage Weak Subjects" onClose={closeWeakModal} persistent>
           <div style={{ marginBottom:14, fontSize:13, color:'#6B7280' }}>
             Select subjects this student is struggling with. This helps faculty prioritise attention.
           </div>
-          <div style={{ display:'flex', flexWrap:'wrap', gap:8, marginBottom:20 }}>
-            {ALL_SUBJECTS.map(sub => (
+          <div style={{ display:'flex', flexWrap:'wrap', gap:8, marginBottom: weakShowCustom ? 10 : 20 }}>
+            {ALL_SUBJECTS.filter(sub => sub !== 'Other').map(sub => (
               <div key={sub} onClick={() => toggleWeak(sub)} style={{
                 padding:'6px 14px', borderRadius:20, fontSize:12, cursor:'pointer', fontWeight:500,
                 background: weakSubjects.includes(sub)?'#FEE2E2':'var(--bg)',
@@ -1230,12 +1251,37 @@ export default function StudentProfile() {
                 border:     `1px solid ${weakSubjects.includes(sub)?'#FECACA':'var(--border)'}`,
                 transition:'all .15s',
               }}>
-                {weakSubjects.includes(sub)?'':''}{sub}
+                {sub}
               </div>
             ))}
+            {/* Custom subjects already picked that aren't part of the base list */}
+            {weakSubjects.filter(sub => !ALL_SUBJECTS.includes(sub)).map(sub => (
+              <div key={sub} onClick={() => toggleWeak(sub)} title="Click to remove" style={{
+                padding:'6px 14px', borderRadius:20, fontSize:12, cursor:'pointer', fontWeight:500,
+                background:'#FEE2E2', color:'#991B1B', border:'1px solid #FECACA', transition:'all .15s',
+              }}>
+                {sub} ✕
+              </div>
+            ))}
+            <div onClick={() => setWeakShowCustom(v => !v)} style={{
+              padding:'6px 14px', borderRadius:20, fontSize:12, cursor:'pointer', fontWeight:500,
+              background: weakShowCustom?'#EFF6FF':'var(--bg)',
+              color: weakShowCustom?'#1E40AF':'var(--muted)',
+              border:`1px dashed ${weakShowCustom?'#93C5FD':'var(--border)'}`,
+            }}>
+              + Other
+            </div>
           </div>
+          {weakShowCustom && (
+            <div style={{ display:'flex', gap:8, marginBottom:20 }}>
+              <input className="form-input" autoFocus placeholder="Type subject name…"
+                value={weakCustomInput} onChange={e => setWeakCustomInput(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCustomWeakSubject(); } }} />
+              <button type="button" className="btn btn-primary btn-sm" onClick={addCustomWeakSubject}>Add</button>
+            </div>
+          )}
           <div style={{ display:'flex', gap:10, justifyContent:'flex-end' }}>
-            <button className="btn btn-ghost" onClick={() => setWeakModal(false)}>Cancel</button>
+            <button className="btn btn-ghost" onClick={closeWeakModal}>Cancel</button>
             <button className="btn btn-primary" onClick={handleSaveWeak} disabled={savingWeak}>
               {savingWeak?'Saving...':'Save'}
             </button>
