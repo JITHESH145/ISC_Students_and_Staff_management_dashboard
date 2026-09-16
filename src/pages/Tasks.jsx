@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getTasks, addTask, updateTask, addNotification, notifyStaff, getStaffProfiles } from '../firebase/services';
+import { subscribeTasks, addTask, updateTask, addNotification, notifyStaff, getStaffProfiles } from '../firebase/services';
 import { Modal, Toast, Loading, FormRow } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { Plus, Search, Flag, Calendar, LayoutGrid, List, Mail } from 'lucide-react';
@@ -47,17 +47,19 @@ export default function Tasks() {
 
   const isCEOorAdmin = profile?.role === 'ceo';
 
-  const load = async () => {
-    // Server-side scoping: staff query only their own tasks (rules
-    // reject an unscoped read for them).
-    const scope = { role: profile?.role, uid: profile?.uid, email: user?.email };
-    const [allTasks, allStaff] = await Promise.all([getTasks(scope), getStaffProfiles()]);
-    setTasks(allTasks);
-    setStaff(allStaff.filter(s => s.active !== false && s.role !== 'ceo'));
-    setLoading(false);
-  };
+  // Staff list (for the assign picker) — changes rarely; one-time fetch.
+  useEffect(() => {
+    getStaffProfiles().then(all =>
+      setStaff(all.filter(s => s.active !== false && s.role !== 'ceo')));
+  }, []);
 
-  useEffect(() => { load(); }, []);
+  // Live tasks: staff see only their own (rules reject an unscoped read),
+  // CEO/Admin see all. New/edited tasks appear with no refresh.
+  useEffect(() => {
+    if (!profile?.role) return;
+    const scope = { role: profile.role, uid: profile.uid, email: user?.email };
+    return subscribeTasks(scope, (t) => { setTasks(t); setLoading(false); });
+  }, [profile?.role, profile?.uid, user?.email]);
 
   const handleAdd = async (e) => {
     e.preventDefault();
@@ -103,7 +105,6 @@ export default function Tasks() {
       setToast({ message:`Task assigned to ${selectedStaff.name}!`, type:'success' });
       setShowModal(false);
       setForm({ title:'', staffId:'', dueDate:'', priority:'normal', notes:'', label:'' });
-      load();
     } catch (err) {
       setToast({ message:'Failed to assign task: ' + err.message, type:'error' });
     } finally {
@@ -113,7 +114,6 @@ export default function Tasks() {
 
   const moveTask = async (id, newStatus) => {
     await updateTask(id, { status: newStatus });
-    load();
   };
 
   // Complete-with-note flow (staff writes a short note the CEO can read)
@@ -141,7 +141,6 @@ export default function Tasks() {
       }
       setToast({ message: 'Task marked as completed!', type: 'success' });
       setCompleting(null); setDoneNote('');
-      load();
     } catch (err) {
       setToast({ message: 'Error: ' + err.message, type: 'error' });
     }

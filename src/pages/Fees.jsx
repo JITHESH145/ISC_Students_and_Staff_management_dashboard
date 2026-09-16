@@ -79,6 +79,20 @@ export default function Fees() {
     }).catch(() => {});
   }, []);
 
+  // Fees is a CEO/Admin financial screen that joins students + fee docs per
+  // batch; it auto-refreshes on tab focus/visibility so payments recorded
+  // elsewhere show without a manual reload. `refreshKey` feeds the load effect.
+  const [refreshKey, setRefreshKey] = useState(0);
+  useEffect(() => {
+    const bump = () => { if (document.visibilityState === 'visible') setRefreshKey(k => k + 1); };
+    window.addEventListener('focus', bump);
+    document.addEventListener('visibilitychange', bump);
+    return () => {
+      window.removeEventListener('focus', bump);
+      document.removeEventListener('visibilitychange', bump);
+    };
+  }, []);
+
   // Load one batch (or every batch when bid === 'ALL'). Each row carries its
   // own batch name + default fee so per-student totals are correct across batches.
   const loadOneBatch = async (b) => {
@@ -110,7 +124,7 @@ export default function Fees() {
     setRows(merged);
     setLoading(false);
   };
-  useEffect(() => { loadBatch(batchId); /* eslint-disable-next-line */ }, [batchId, batches]);
+  useEffect(() => { loadBatch(batchId); /* eslint-disable-next-line */ }, [batchId, batches, refreshKey]);
 
   const isAllBatches = batchId === 'ALL';
   const batch = batches.find(b => b.id === batchId);

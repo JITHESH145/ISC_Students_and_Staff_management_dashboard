@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
-  getConcerns, addConcern, updateConcern,
+  subscribeConcerns, addConcern, updateConcern,
   getStudents, getStaffProfiles, notifyStaff
 } from '../firebase/services';
 import { Modal, Toast, Loading, FormRow } from '../components/ui';
@@ -39,18 +39,23 @@ export default function Concerns() {
     assignedTo:'', assignedToEmail:'', status:'open'
   });
 
-  const load = async () => {
-    const scope = { role: profile?.role, uid: profile?.uid, email: user?.email };
-    const [c, s, st] = await Promise.all([
-      getConcerns({}, scope), getStudents(scope), getStaffProfiles()
-    ]);
-    setConcerns(c);
-    setStudents(s);
-    setStaffList(st.filter(x => x.active !== false));
-    setLoading(false);
-  };
+  // Picker data (students + staff) — one-time on mount.
+  useEffect(() => {
+    if (!profile?.role) return;
+    const scope = { role: profile.role, uid: profile.uid, email: user?.email };
+    Promise.all([getStudents(scope), getStaffProfiles()]).then(([s, st]) => {
+      setStudents(s);
+      setStaffList(st.filter(x => x.active !== false));
+    });
+  }, [profile?.role, profile?.uid, user?.email]);
 
-  useEffect(() => { load(); }, []);
+  // Live concerns: staff see raised-by-me / assigned-to-me, CEO sees all.
+  // New concerns and status changes appear with no refresh.
+  useEffect(() => {
+    if (!profile?.role) return;
+    const scope = { role: profile.role, uid: profile.uid, email: user?.email };
+    return subscribeConcerns({}, scope, (c) => { setConcerns(c); setLoading(false); });
+  }, [profile?.role, profile?.uid, user?.email]);
 
   // Visibility: CEO/admin see everything. Staff see only concerns they raised
   // or that are assigned to them.
@@ -114,7 +119,6 @@ export default function Concerns() {
       });
       setShowModal(false);
       setForm({ studentId:'', type:'', description:'', assignedTo:'', assignedToEmail:'', status:'open' });
-      load();
     } catch (err) {
       setToast({ message:'Failed: ' + err.message, type:'error' });
     } finally {
@@ -125,7 +129,6 @@ export default function Concerns() {
   const toggleStatus = async (concern) => {
     const next = concern.status === 'open' ? 'resolved' : 'open';
     await updateConcern(concern.id, { status: next });
-    load();
   };
 
   const formatDate = (ts) => {

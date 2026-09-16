@@ -1,6 +1,6 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getStudentsPaged, searchStudents, deleteStudent, addStudent, getStudentCount, getBatches, getStaffProfiles } from '../firebase/services';
+import { subscribeStudents, searchStudents, deleteStudent, addStudent, getBatches, getStaffProfiles } from '../firebase/services';
 import { Modal, Toast, Avatar, StatusBadge, Loading, Confirm, FormRow } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { Plus, Search, Eye, Trash2, Upload, ChevronRight, ChevronLeft, Users } from 'lucide-react';
@@ -13,15 +13,12 @@ const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${Stri
 export default function StudentsPage() {
   const { profile }    = useAuth();
   const navigate       = useNavigate();
-  const [students, setStudents]       = useState([]);
+  const [liveStudents, setLiveStudents] = useState([]); // live scoped list
+  const [searchResults, setSearchResults] = useState(null); // non-null while searching
   const [batches, setBatches]         = useState([]);
   const [staffList, setStaffList]     = useState([]);
   const [loading, setLoading]         = useState(true);
-  const [totalCount, setTotalCount]   = useState(0);
-  const [lastDoc, setLastDoc]         = useState(null);
-  const [hasMore, setHasMore]         = useState(false);
   const [search, setSearch]           = useState('');
-  const [searching, setSearching]     = useState(false);
   const [batchFilter, setBatchFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [showModal, setShowModal]     = useState(false);
@@ -40,48 +37,42 @@ export default function StudentsPage() {
   // rules require; CEO queries are unscoped.
   const scope = { role: profile?.role, uid: profile?.uid, email: profile?.email };
 
-  const loadPage = useCallback(async (reset = false) => {
-    setLoading(true);
-    const filters = {};
-    if (batchFilter)  filters.batchId = batchFilter;
-    if (statusFilter) filters.status  = statusFilter;
+  // Displayed list: search results when a search is active, else the live list.
+  const students   = searchResults ?? liveStudents;
+  const totalCount = liveStudents.length;
+  const searching  = !!search.trim() && searchResults === null; // debouncing
+  const hasMore    = false;
+  const loadPage   = () => {}; // no-op: the live listener keeps the list current
 
-    const startDoc = reset ? null : lastDoc;
-    const result = await getStudentsPaged(filters, reset ? null : startDoc, scope);
-    if (reset) {
-      setStudents(result.students);
-    } else {
-      setStudents(prev => [...prev, ...result.students]);
-    }
-    setLastDoc(result.lastDoc);
-    setHasMore(result.hasMore);
-
-    if (reset) {
-      const count = await getStudentCount(scope);
-      setTotalCount(count);
-    }
-    setLoading(false);
-  }, [batchFilter, statusFilter, profile]);
-
+  // Batches + staff for the filter dropdown / add form — one-time.
   useEffect(() => {
     Promise.all([getBatches(), getStaffProfiles()]).then(([b, s]) => {
       setBatches(b);
       setStaffList(s.filter(s => s.active !== false));
     });
-    loadPage(true);
-  }, [batchFilter, statusFilter]);
+  }, []);
 
-  // Search with debounce
+  // Live students: any add/edit/delete (by anyone) reflects with no refresh.
+  // Staff see only their scoped set; CEO sees the newest 500 live.
   useEffect(() => {
-    if (!search.trim()) { loadPage(true); return; }
+    if (!profile?.role) return;
+    setLoading(true);
+    const filters = {};
+    if (batchFilter)  filters.batchId = batchFilter;
+    if (statusFilter) filters.status  = statusFilter;
+    const sc = { role: profile.role, uid: profile.uid, email: profile.email };
+    return subscribeStudents(filters, sc, (rows) => { setLiveStudents(rows); setLoading(false); });
+  }, [batchFilter, statusFilter, profile?.role, profile?.uid, profile?.email]);
+
+  // Search with debounce (transient — overlays the live list while typing).
+  useEffect(() => {
+    if (!search.trim()) { setSearchResults(null); return; }
     const t = setTimeout(async () => {
-      setSearching(true);
       const results = await searchStudents(search, scope);
-      setStudents(results);
-      setHasMore(false);
-      setSearching(false);
+      setSearchResults(results);
     }, 400);
     return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search]);
 
   const handleAdd = async (e) => {

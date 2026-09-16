@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getDailyReports, addReport } from '../firebase/services';
+import { subscribeDailyReports, addReport } from '../firebase/services';
 import { Modal, Toast, Loading, FormRow } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { Send, Plus, Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
@@ -48,13 +48,16 @@ export default function Reports() {
   });
   const [form, setForm] = useState(blankForm());
 
-  const load = async () => {
-    const r = await getDailyReports({ role: profile?.role, uid: profile?.uid, email: profile?.email });
-    setAllReports(r);
-    setLoading(false);
-  };
+  // Kept as a no-op for the post-submit call-site — the listener repaints.
+  const load = async () => {};
 
-  useEffect(() => { load(); }, []);
+  // Live daily reports: staff see their own, CEO sees all. New reports appear
+  // with no refresh.
+  useEffect(() => {
+    if (!profile?.role) return;
+    const scope = { role: profile.role, uid: profile.uid, email: profile.email };
+    return subscribeDailyReports(scope, (r) => { setAllReports(r); setLoading(false); });
+  }, [profile?.role, profile?.uid, profile?.email]);
 
   // Filter: staff see only their own reports; CEO sees all (optionally by date)
   const reports = allReports.filter(r => {

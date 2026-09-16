@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getTrashItems, restoreFromTrash, permanentDelete } from '../firebase/services';
+import { subscribeTrashItems, restoreFromTrash, permanentDelete } from '../firebase/services';
 import { Loading, Toast, Confirm } from '../components/ui';
 import { Trash2, RotateCcw, AlertCircle, User, School } from 'lucide-react';
 
@@ -17,15 +17,11 @@ export default function Trash() {
   const [confirmBox, setConfirmBox] = useState(null); // in-app confirm (replaces window.confirm)
   const askConfirm = (message, onConfirm, confirmLabel = 'Delete') => setConfirmBox({ message, onConfirm, confirmLabel });
 
-  const load = async (type) => {
+  // Live: restores/deletes by any CEO/Admin reflect immediately.
+  useEffect(() => {
     setLoading(true);
-    try {
-      setItems(await getTrashItems(type));
-    } catch { setItems([]); }
-    setLoading(false);
-  };
-
-  useEffect(() => { load(tab); }, [tab]);
+    return subscribeTrashItems(tab, (i) => { setItems(i); setLoading(false); });
+  }, [tab]);
 
   const handleRestore = (item) => askConfirm('Restore this item?', () => doRestore(item), 'Restore');
 
@@ -34,7 +30,6 @@ export default function Trash() {
     try {
       await restoreFromTrash(item.id, item.type, item.originalId, item.data);
       setToast({ message: 'Restored successfully!', type: 'success' });
-      load(tab);
     } catch (err) {
       setToast({ message: 'Error: ' + err.message, type: 'error' });
     }
@@ -48,7 +43,6 @@ export default function Trash() {
     try {
       await permanentDelete(item.id);
       setToast({ message: 'Permanently deleted.', type: 'success' });
-      load(tab);
     } catch (err) {
       setToast({ message: 'Error: ' + err.message, type: 'error' });
     }
@@ -65,7 +59,6 @@ export default function Trash() {
     try {
       await Promise.all(items.map(item => permanentDelete(item.id)));
       setToast({ message: `All ${tab}s permanently deleted.`, type: 'success' });
-      load(tab);
     } catch (err) {
       setToast({ message: 'Error: ' + err.message, type: 'error' });
     }

@@ -2,11 +2,44 @@ import {
   collection, doc, addDoc, updateDoc, deleteDoc,
   getDocs, getDoc, query, where, orderBy, or,
   serverTimestamp, setDoc, limit, startAfter,
-  getCountFromServer
+  getCountFromServer, onSnapshot
 } from 'firebase/firestore';
 import { db, auth } from './config';
 
 const PAGE_SIZE = 50;
+
+// ── Real-time subscription layer (multi-user live sync) ─────────
+// Every `subscribe*` below mirrors its `get*` sibling's query EXACTLY
+// (same scope/where clauses so the rules still accept it, same NO-orderBy
+// + sort-in-JS convention) but uses onSnapshot, so a change any user makes
+// pushes to every other open client with no refresh. Each returns an
+// unsubscribe function — call it on component unmount.
+//
+// Shared sort comparators (match the get* functions):
+const byCreatedDesc = (a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0);
+const byNameAsc     = (a, b) => (a.name || '').localeCompare(b.name || '');
+const byDateDesc    = (a, b) => (b.date || '').localeCompare(a.date || '');
+
+// Generic listener: run a query, map docs → objects, optionally filter/sort
+// in JS, deliver to `cb`. `onError` is best-effort (logged in dev). Returns
+// the onSnapshot unsubscribe fn. A no-op unsub is returned for a null query
+// (e.g. a subscribe called before its id argument is ready).
+const listen = (q, cb, { sort, filter, onError } = {}) => {
+  if (!q) return () => {};
+  return onSnapshot(
+    q,
+    (snap) => {
+      let rows = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      if (filter) rows = rows.filter(filter);
+      if (sort)   rows = rows.sort(sort);
+      cb(rows);
+    },
+    (err) => {
+      import.meta.env.DEV && console.warn('[live] query error:', err.message);
+      onError?.(err);
+    }
+  );
+};
 
 // ── Access scoping helpers (Phase 1 security remediation) ───────
 // A "scope" is { role, uid, email }. Staff queries MUST carry the
@@ -810,3 +843,205 @@ export const getAllFees = async (scope = null) => {
 // passes the full recomputed `payments` array and `totalFee` on every change.
 export const saveFee = async (studentId, data) =>
   setDoc(doc(db, 'fees', studentId), { ...data, studentId, updatedAt: serverTimestamp() }, { merge: true });
+
+// ════════════════════════════════════════════════════════════════
+//  REAL-TIME SUBSCRIPTIONS  (mirror the get* queries above)
+//  Each returns an unsubscribe function. See `listen` for the shape.
+// ════════════════════════════════════════════════════════════════
+
+// ── Students ───────────────────────────────────────────────────
+// Live list, scoped like getStudentsPaged but WITHOUT server pagination
+// (onSnapshot + startAfter cursors don't compose): staff get their scoped
+// set (≤500), CEO gets the newest `cap` students live. Optional batch/status
+// filters applied in the query where possible. Sorted newest-first in JS.
+export const subscribeStudents = (filters = {}, scope = null, cb, cap = 500) => {
+  let q;
+  if (scope && !isCeoScope(scope)) {
+    const cons = [where('staffIds', 'array-contains', scope.uid), limit(cap)];
+    if (filters.batchId) cons.push(where('batchId', '==', filters.batchId));
+    if (filters.status)  cons.push(where('status', '==', filters.status));
+    q = query(studentsRef(), ...cons);
+  } else {
+    const cons = [];
+    if (filters.batchId) cons.push(where('batchId', '==', filters.batchId));
+    if (filters.status)  cons.push(where('status', '==', filters.status));
+    q = query(studentsRef(), ...cons, limit(cap));
+  }
+  return listen(q, cb, { sort: byCreatedDesc });
+};
+
+export const subscribeBatchStudents = (batchId, scope, cb) => {
+  if (!batchId) return () => {};
+  const q = (scope && !isCeoScope(scope))
+    ? query(studentsRef(), where('batchId','==',batchId), where('staffIds','array-contains',scope.uid), limit(500))
+    : query(studentsRef(), where('batchId','==',batchId), limit(500));
+  return listen(q, cb, { sort: byNameAsc });
+};
+
+export const subscribeStudent = (id, cb) => {
+  if (!id) return () => {};
+  return onSnapshot(doc(db, 'students', id),
+    (snap) => cb(snap.exists() ? { id: snap.id, ...snap.data() } : null),
+    (err) => { import.meta.env.DEV && console.warn('[live] student error:', err.message); });
+};
+
+// ── Batches ────────────────────────────────────────────────────
+export const subscribeBatches = (cb) =>
+  listen(collection(db, 'batches'), cb, { sort: byCreatedDesc });
+
+export const subscribeBatch = (id, cb) => {
+  if (!id) return () => {};
+  return onSnapshot(doc(db, 'batches', id),
+    (snap) => cb(snap.exists() ? { id: snap.id, ...snap.data() } : null),
+    (err) => { import.meta.env.DEV && console.warn('[live] batch error:', err.message); });
+};
+
+// Batches a staff member is assigned to (staffIds OR mentor). Two live
+// listeners merged into one deduped, newest-first list.
+export const subscribeStaffBatches = (uid, cb) => {
+  if (!uid) return () => {};
+  let byStaff = [], byMentor = [];
+  const emit = () => {
+    const map = {};
+    [...byStaff, ...byMentor].forEach(b => { map[b.id] = b; });
+    cb(Object.values(map).sort(byCreatedDesc));
+  };
+  const u1 = listen(query(collection(db,'batches'), where('staffIds','array-contains',uid)),
+    (rows) => { byStaff = rows; emit(); });
+  const u2 = listen(query(collection(db,'batches'), where('mentorId','==',uid)),
+    (rows) => { byMentor = rows; emit(); });
+  return () => { u1(); u2(); };
+};
+
+// ── Schedules ──────────────────────────────────────────────────
+const scheduleSort = (a, b) =>
+  (a.day||'').localeCompare(b.day||'') || (a.time||'').localeCompare(b.time||'');
+
+export const subscribeAllSchedules = (cb) =>
+  listen(collection(db,'schedules'), cb, { sort: scheduleSort });
+
+export const subscribeBatchSchedules = (batchId, cb) => {
+  if (!batchId) return () => {};
+  return listen(query(collection(db,'schedules'), where('batchId','==',batchId)), cb, { sort: scheduleSort });
+};
+
+// Schedules across only the batches a staff member belongs to.
+// (batchIds is a small array; Firestore 'in' allows ≤30 values.)
+export const subscribeSchedulesForBatches = (batchIds, cb) => {
+  const ids = (batchIds || []).slice(0, 30);
+  if (!ids.length) { cb([]); return () => {}; }
+  return listen(query(collection(db,'schedules'), where('batchId','in',ids)), cb, { sort: scheduleSort });
+};
+
+// ── Tasks (staff to-dos) ───────────────────────────────────────
+export const subscribeTasks = (scope, cb) => {
+  const q = (scope && !isCeoScope(scope))
+    ? query(collection(db,'tasks'), where('assignedToEmail','==',scope.email), limit(200))
+    : query(collection(db,'tasks'), limit(200));
+  return listen(q, cb, { sort: byCreatedDesc });
+};
+
+// ── Batch tasks ────────────────────────────────────────────────
+export const subscribeBatchTasks = (batchId, cb) => {
+  if (!batchId) return () => {};
+  return listen(query(collection(db,'batchTasks'), where('batchId','==',batchId)), cb, { sort: byCreatedDesc });
+};
+
+// ── Follow-ups ─────────────────────────────────────────────────
+export const subscribeAllFollowUps = (scope, cb) => {
+  const q = (scope && !isCeoScope(scope))
+    ? query(collection(db,'followups'),
+        or(where('assignedToEmail','==',scope.email), where('assignedByEmail','==',scope.email)),
+        limit(300))
+    : query(collection(db,'followups'), limit(200));
+  return listen(q, cb, { sort: byCreatedDesc });
+};
+
+// ── Concerns ───────────────────────────────────────────────────
+export const subscribeConcerns = (filters = {}, scope = null, cb) => {
+  let q;
+  if (scope && !isCeoScope(scope)) {
+    q = query(collection(db,'concerns'),
+      or(where('raisedByEmail','==',scope.email), where('assignedToEmail','==',scope.email)),
+      limit(200));
+  } else {
+    const cons = [];
+    if (filters.batchId)    cons.push(where('batchId','==',filters.batchId));
+    if (filters.assignedTo) cons.push(where('assignedTo','==',filters.assignedTo));
+    if (filters.status)     cons.push(where('status','==',filters.status));
+    q = query(collection(db,'concerns'), ...cons, limit(200));
+  }
+  return listen(q, cb, { sort: byCreatedDesc });
+};
+
+// ── Leads (CEO-only) ───────────────────────────────────────────
+export const subscribeLeads = (cb) =>
+  listen(query(collection(db,'leads'), limit(300)), cb, { sort: byCreatedDesc });
+
+// ── Assessments ────────────────────────────────────────────────
+export const subscribeAssessments = (batchId, cb) => {
+  const q = batchId
+    ? query(collection(db,'assessments'), where('batchId','==',batchId))
+    : query(collection(db,'assessments'), limit(500));
+  return listen(q, cb, { sort: byDateDesc });
+};
+
+export const subscribeAssessmentResults = (assessmentId, cb) => {
+  if (!assessmentId) return () => {};
+  return listen(query(collection(db,'assessmentResults'), where('assessmentId','==',assessmentId)), cb,
+    { sort: (a,b) => (b.percentage||0) - (a.percentage||0) });
+};
+
+// ── Daily reports ──────────────────────────────────────────────
+export const subscribeDailyReports = (scope, cb) => {
+  const q = (scope && !isCeoScope(scope))
+    ? query(collection(db,'reports'), where('staffEmail','==',scope.email), limit(200))
+    : query(collection(db,'reports'), limit(200));
+  return listen(q, cb, { sort: byCreatedDesc });
+};
+
+// ── Requests ───────────────────────────────────────────────────
+export const subscribeRequests = (status, cb) => {
+  const q = status
+    ? query(collection(db,'requests'), where('status','==',status))
+    : collection(db,'requests');
+  return listen(q, cb, { sort: (a,b) => (b.createdAt?.seconds||0)-(a.createdAt?.seconds||0) });
+};
+
+export const subscribeMyRequests = (uid, cb) => {
+  if (!uid) return () => {};
+  return listen(query(collection(db,'requests'), where('requestedBy','==',uid)), cb,
+    { sort: (a,b) => (b.createdAt?.seconds||0)-(a.createdAt?.seconds||0) });
+};
+
+// ── Trash (CEO-only) ───────────────────────────────────────────
+export const subscribeTrashItems = (type, cb) => {
+  if (!type) return () => {};
+  return listen(query(collection(db,'trash'), where('type','==',type)), cb,
+    { sort: (a,b) => (b.deletedAt?.seconds||0)-(a.deletedAt?.seconds||0) });
+};
+
+// ── Staff directory / full profiles ────────────────────────────
+export const subscribeStaffProfiles = (cb) =>
+  listen(collection(db,'staffDirectory'), (rows) => cb(rows.map(r => ({ ...r, uid: r.id }))));
+
+export const subscribeStaffFull = (cb) =>
+  listen(collection(db,'staff'), cb);
+
+// ── Notifications (per-recipient) ──────────────────────────────
+export const subscribeMyNotifications = (email, cb) => {
+  if (!email) return () => {};
+  return listen(query(collection(db,'notifications'), where('toEmail','==',email)), cb, { sort: byCreatedDesc });
+};
+
+// ── Fees (CEO-only) ────────────────────────────────────────────
+export const subscribeFeesByBatch = (batchId, scope, cb) => {
+  if (scope && !isCeoScope(scope)) { cb([]); return () => {}; }
+  if (!batchId) return () => {};
+  return listen(query(feesRef(), where('batchId','==',batchId)), cb);
+};
+
+export const subscribeAllFees = (scope, cb) => {
+  if (scope && !isCeoScope(scope)) { cb([]); return () => {}; }
+  return listen(feesRef(), cb);
+};

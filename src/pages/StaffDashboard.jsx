@@ -80,6 +80,19 @@ export default function StaffDashboard() {
   const HUB_PAGE = 20;
   const [hubPage, setHubPage] = useState(0);
 
+  // Summary screen: auto-refresh on tab focus / visibility so your tasks,
+  // follow-ups, notifications and batches stay current without a manual reload.
+  const [refreshKey, setRefreshKey] = useState(0);
+  useEffect(() => {
+    const bump = () => { if (document.visibilityState === 'visible') setRefreshKey(k => k + 1); };
+    window.addEventListener('focus', bump);
+    document.addEventListener('visibilitychange', bump);
+    return () => {
+      window.removeEventListener('focus', bump);
+      document.removeEventListener('visibilitychange', bump);
+    };
+  }, []);
+
   useEffect(() => {
     const load = async () => {
       try {
@@ -104,7 +117,7 @@ export default function StaffDashboard() {
       }
     };
     if (profile?.uid) load();
-  }, [profile?.uid]);
+  }, [profile?.uid, refreshKey]);
 
   // ── Due-today & 1-hour-before reminders ──────────────────────────────────
   useEffect(() => {

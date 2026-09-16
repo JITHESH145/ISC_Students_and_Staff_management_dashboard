@@ -60,6 +60,19 @@ export default function StaffManagement() {
 
   useEffect(() => { load(); }, []);
 
+  // Auto-refresh the staff roster on tab focus/visibility so changes made by
+  // another admin appear without a manual reload.
+  useEffect(() => {
+    const bump = () => { if (document.visibilityState === 'visible') load(); };
+    window.addEventListener('focus', bump);
+    document.addEventListener('visibilitychange', bump);
+    return () => {
+      window.removeEventListener('focus', bump);
+      document.removeEventListener('visibilitychange', bump);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ── Add staff — completely in-app, no Firebase Console needed ─
   const handleAdd = async (e) => {
     e.preventDefault();

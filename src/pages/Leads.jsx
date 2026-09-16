@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getLeads, addLead, updateLead } from '../firebase/services';
+import { subscribeLeads, addLead, updateLead } from '../firebase/services';
 import { Modal, Toast, Loading, FormRow } from '../components/ui';
 import { Plus, Search, ArrowRight } from 'lucide-react';
 
@@ -30,13 +30,8 @@ export default function Leads() {
   const [form, setForm] = useState({ name: '', phone: '', email: '', course: '', source: '', notes: '' });
   const [view, setView] = useState('kanban');
 
-  const load = async () => {
-    const l = await getLeads();
-    setLeads(l);
-    setLoading(false);
-  };
-
-  useEffect(() => { load(); }, []);
+  // Live: leads update in real time across all CEO/Admin sessions.
+  useEffect(() => subscribeLeads((l) => { setLeads(l); setLoading(false); }), []);
 
   const filtered = leads.filter(l => {
     const q = search.toLowerCase();
@@ -52,7 +47,6 @@ export default function Leads() {
     setToast({ message: 'Lead added!', type: 'success' });
     setShowModal(false);
     setForm({ name: '', phone: '', email: '', course: '', source: '', notes: '' });
-    load();
     setSaving(false);
   };
 
@@ -60,7 +54,6 @@ export default function Leads() {
     const idx = STAGES.indexOf(lead.stage);
     if (idx < STAGES.length - 1) {
       await updateLead(lead.id, { stage: STAGES[idx + 1] });
-      load();
     }
   };
 

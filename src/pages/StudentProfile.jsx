@@ -142,6 +142,20 @@ export default function StudentProfile() {
 
   const isCEOorAdmin = profile?.role === 'ceo';
 
+  // Detail screen that aggregates the student doc + follow-ups, assessments,
+  // reports, attendance and tasks. It auto-refreshes on tab focus/visibility so
+  // edits made elsewhere show without a manual reload.
+  const [refreshKey, setRefreshKey] = useState(0);
+  useEffect(() => {
+    const bump = () => { if (document.visibilityState === 'visible') setRefreshKey(k => k + 1); };
+    window.addEventListener('focus', bump);
+    document.addEventListener('visibilitychange', bump);
+    return () => {
+      window.removeEventListener('focus', bump);
+      document.removeEventListener('visibilitychange', bump);
+    };
+  }, []);
+
   const load = async () => {
     try {
       const s  = await getStudent(id).catch(() => null);
@@ -178,7 +192,7 @@ export default function StudentProfile() {
     }
   };
 
-  useEffect(() => { load(); }, [id]);
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, [id, refreshKey]);
 
   const batchName = (bid) => batches.find(b => b.id === bid)?.name || '—';
 

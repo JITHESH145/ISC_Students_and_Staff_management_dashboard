@@ -89,6 +89,20 @@ export default function Documents() {
     return () => clearTimeout(t);
   }, []);
 
+  // Documents live in Firebase Storage (no Firestore listener), so re-list them
+  // when the tab regains focus/visibility — uploads by others appear without a
+  // manual reload.
+  useEffect(() => {
+    const bump = () => { if (document.visibilityState === 'visible') loadDocs(); };
+    window.addEventListener('focus', bump);
+    document.addEventListener('visibilitychange', bump);
+    return () => {
+      window.removeEventListener('focus', bump);
+      document.removeEventListener('visibilitychange', bump);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const studentName = (id) => students.find(s => s.id === id)?.name || id || 'Unknown';
 
   const handleUpload = async (e) => {

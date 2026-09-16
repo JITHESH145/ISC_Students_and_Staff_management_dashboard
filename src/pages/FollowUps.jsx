@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getAllFollowUps, getStudents, addFollowUp, completeFollowUp, notifyStaff, getStaffProfiles, getBatches, getBatchStudents } from '../firebase/services';
+import { subscribeAllFollowUps, getStudents, addFollowUp, completeFollowUp, notifyStaff, getStaffProfiles, getBatches, getBatchStudents } from '../firebase/services';
 import { Modal, Toast, Loading, Avatar, FormRow } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { Plus, Search, Mail, CheckCircle, Clock } from 'lucide-react';
@@ -37,18 +37,25 @@ export default function FollowUps() {
     return staff.filter(s => ids.includes(s.id));
   };
 
-  const load = async () => {
-    // Queries are scoped server-side: staff receive only their own
-    // follow-ups / students (rules reject unscoped queries).
-    const [f, s, st, b] = await Promise.all([getAllFollowUps(scope), getStudents(scope), getStaffProfiles(), getBatches().catch(() => [])]);
-    setFollowups(f);
-    setStudents(s);
-    setStaff(st.filter(s => s.active !== false && s.role !== 'ceo'));
-    setBatches(b || []);
-    setLoading(false);
-  };
+  // Picker data (students/staff/batches) — one-time on mount. Queries are
+  // scoped server-side: staff receive only their own students.
+  useEffect(() => {
+    if (!profile?.role) return;
+    const sc = { role: profile.role, uid: profile.uid, email: user?.email };
+    Promise.all([getStudents(sc), getStaffProfiles(), getBatches().catch(() => [])]).then(([s, st, b]) => {
+      setStudents(s);
+      setStaff(st.filter(x => x.active !== false && x.role !== 'ceo'));
+      setBatches(b || []);
+    });
+  }, [profile?.role, profile?.uid, user?.email]);
 
-  useEffect(() => { load(); }, []);
+  // Live follow-ups: staff see assigned-to-me / assigned-by-me, CEO sees all.
+  // New assignments and completions appear with no refresh.
+  useEffect(() => {
+    if (!profile?.role) return;
+    const sc = { role: profile.role, uid: profile.uid, email: user?.email };
+    return subscribeAllFollowUps(sc, (f) => { setFollowups(f); setLoading(false); });
+  }, [profile?.role, profile?.uid, user?.email]);
 
   // Load the chosen batch's full student roster (the general list is paginated).
   useEffect(() => {
@@ -115,7 +122,6 @@ export default function FollowUps() {
       setToast({ message: recipients.length > 1 ? `Follow-up assigned to ${recipients.length} staff!` : `Follow-up assigned to ${recipients[0].name}!`, type: 'success' });
       setShowModal(false);
       setForm({ batchId: '', studentId: '', studentName: '', staffId: '', note: '', nextAction: '', priority: 'normal' });
-      load();
     } catch (err) {
       setToast({ message: 'Failed: ' + err.message, type: 'error' });
     } finally { setSaving(false); }
@@ -129,7 +135,6 @@ export default function FollowUps() {
     setCompleting(null);
     setCompletionNote('');
     setToast({ message: 'Follow-up completed!', type: 'success' });
-    load();
   };
 
   const formatDate = (ts) => {

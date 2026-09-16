@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
-  getBatches, addBatch, updateBatch,
+  getBatches, subscribeBatches, addBatch, updateBatch,
   getBatchStudents, addStudent, bulkAddStudents, getBatchStudentCount, updateStudent, syncBatchStaffToStudents,
   getStaffProfiles, getBatchSchedules, addBatchSchedule, deleteBatchSchedule,
   getBatchTasks, addBatchTask, markTaskSubmitted, updateBatchTask, deleteBatchTask,
@@ -541,20 +541,44 @@ export default function Batches() {
     }
   };
 
+  // Live batch list: new/edited batches appear across sessions with no refresh.
+  // Staff see only batches they're assigned to (mentor or staff member).
+  // Per-batch student counts recompute whenever the batch set changes.
   useEffect(() => {
-    loadBatches().then(() => {
-      if (location.state?.batchId) {
-        getBatches().then(allBatches => {
-          const target = allBatches.find(b => b.id === location.state.batchId);
-          if (target) {
-            loadBatchDetail(target).then(() => {
-              setSelectedBatch(target);
-              if (location.state?.tab) setActiveTab(location.state.tab);
-            });
-          }
-        }).catch(() => {});
-      }
+    if (!profile?.role) return;
+    const uid = profile.uid;
+    const isStaff = !isCEOorAdmin;
+    return subscribeBatches(async (b) => {
+      const filtered = isStaff
+        ? b.filter(batch => batch.mentorId === uid || (batch.staffIds || []).includes(uid))
+        : b;
+      setBatches(filtered);
+      setLoading(false);
+      const counts = {};
+      await Promise.all(filtered.map(async batch => { counts[batch.id] = await getBatchStudentCount(batch.id, scope); }));
+      setBatchCounts(counts);
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile?.role, profile?.uid]);
+
+  // Staff list (for pickers) — changes rarely; one-time fetch.
+  useEffect(() => {
+    getStaffProfiles().then(s => setStaffList(s.filter(x => x.active !== false)));
+  }, []);
+
+  // Deep-link: open a specific batch passed via router navigation state (once).
+  useEffect(() => {
+    if (!location.state?.batchId) return;
+    getBatches().then(allBatches => {
+      const target = allBatches.find(b => b.id === location.state.batchId);
+      if (target) {
+        loadBatchDetail(target).then(() => {
+          setSelectedBatch(target);
+          if (location.state?.tab) setActiveTab(location.state.tab);
+        });
+      }
+    }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const openBatch = async (batch) => {

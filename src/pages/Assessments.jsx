@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import {
-  getAssessments, addAssessment, deleteAssessment,
+  subscribeAssessments, addAssessment, deleteAssessment,
   getBatches, getStaffProfiles, getBatchStudents,
   saveAssessmentResults, getAssessmentResults,
   addNotification, createRequest, updateTopLevelAssessment,
@@ -111,36 +111,33 @@ export default function Assessments({ filterBatchId = null }) {
   const [removalReason, setRemovalReason] = useState('');
 
   // ── Load ──────────────────────────────────────────────────────
-  const load = async () => {
-    setLoading(true);
-    try {
-      const [a, b, s] = await Promise.all([
-        getAssessments(filterBatchId || undefined),
-        getBatches(),
-        getStaffProfiles(),
-      ]);
-      setAssessments(a);
+  // Kept as a no-op so post-mutation call-sites still compile — the live
+  // listener below already repaints after any add/edit/delete.
+  const load = async () => {};
+
+  // Batches + staff (pickers) — one-time on mount.
+  useEffect(() => {
+    Promise.all([getBatches(), getStaffProfiles()]).then(([b, s]) => {
       setBatches(b);
       setStaffList(s.filter(x => x.active !== false));
+    });
+  }, []);
 
-      // Fetch result counts for all assessments in parallel
+  // Live assessments (+ per-assessment result counts). New assessments and
+  // marks entered by any staff appear with no refresh. Re-subscribes on filter.
+  useEffect(() => {
+    setLoading(true);
+    return subscribeAssessments(filterBatchId || undefined, async (a) => {
+      setAssessments(a);
+      setLoading(false);
       const counts = {};
-      await Promise.all(
-        a.map(async (assessment) => {
-          try {
-            const res = await getAssessmentResults(assessment.id);
-            counts[assessment.id] = res.length;
-          } catch {
-            counts[assessment.id] = 0;
-          }
-        })
-      );
+      await Promise.all(a.map(async (assessment) => {
+        try { counts[assessment.id] = (await getAssessmentResults(assessment.id)).length; }
+        catch { counts[assessment.id] = 0; }
+      }));
       setResultCounts(counts);
-    } catch { }
-    setLoading(false);
-  };
-
-  useEffect(() => { load(); }, [filterBatchId]); // eslint-disable-line react-hooks/exhaustive-deps
+    });
+  }, [filterBatchId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Derived list ──────────────────────────────────────────────
   // Student-profile assessments store the name in `testName`; batch ones use

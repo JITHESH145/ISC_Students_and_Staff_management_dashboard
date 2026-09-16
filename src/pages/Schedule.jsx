@@ -1,7 +1,8 @@
-import { useEffect, useState, Fragment } from 'react';
+import { useEffect, useState, useMemo, useRef, Fragment } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  getBatches, getStaffBatches, getBatchSchedules, getAllSchedules, addBatchSchedule,
+  getBatches, getStaffBatches, getBatchSchedules, addBatchSchedule,
+  subscribeAllSchedules, subscribeBatchSchedules,
   deleteBatchSchedule, updateScheduleStatus, updateBatchSchedule, saveAttendance,
   getSessionAttendance, deleteSessionAttendance, getBatchStudents, getStaffProfiles,
   saveClassReport, updateClassReport, getSessionReports, deleteSessionReports, getStudentReports,
@@ -137,7 +138,7 @@ export default function Schedule() {
 
   const [batches,       setBatches]       = useState([]);
   const [selectedBatch, setSelectedBatch] = useState(ALL); // default: show everything
-  const [schedules,     setSchedules]     = useState([]);
+  const [rawSchedules,  setRawSchedules]  = useState([]);
   const [assessments,   setAssessments]   = useState([]);
   const [staffList,     setStaffList]     = useState([]);
   const [loading,       setLoading]       = useState(true);
@@ -245,44 +246,42 @@ export default function Schedule() {
     return (sch || []).filter(s => ids.has(s.batchId));
   };
 
-  // ── Load batches + all schedules ──────────────────────────────
-  const reloadSchedules = async () => {
-    try {
-      const sch = selectedBatch === ALL ? await getAllSchedules() : await getBatchSchedules(selectedBatch);
-      setSchedules(scopeForStaff(sch, batches));
-    } catch (err) {
-      import.meta.env.DEV && console.error('Schedule load failed:', err);
-      setSchedules([]);
-    }
-  };
+  // Final schedules the page renders = raw docs filtered to what this user may
+  // see. Derived (not stored) so it recomputes whenever batches load/change or
+  // the live schedule feed updates.
+  const schedules = useMemo(
+    () => scopeForStaff(rawSchedules, batches),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rawSchedules, batches, profile?.role, profile?.uid]
+  );
 
-  useEffect(() => {
-    const load = async () => {
-      setLoading(true);
-      try {
-        const [bList, sList, asmts, sch] = await Promise.all([
-          getBatches().catch(() => []),
-          getStaffProfiles().catch(() => []),
-          getAllAssessments().catch(() => []),
-          getAllSchedules().catch(() => []),
-        ]);
-        setBatches(bList);
-        setStaffList(sList);
-        setAssessments(asmts);
-        setSchedules(scopeForStaff(sch, bList));
-      } catch (err) {
-        import.meta.env.DEV && console.error('Schedule initial load failed:', err);
-      } finally {
-        setLoading(false);   // always render, never hang on a blank spinner
-      }
-    };
-    load();
-  }, []);  // eslint-disable-line
+  // Live shared calendar: schedules stream in real time, so a class/meeting
+  // added or moved by anyone shows on every open calendar with no refresh.
+  // reloadSchedules is kept as a no-op for the mutation call-sites below —
+  // the listener already repaints them.
+  const reloadSchedules = async () => {};
 
+  // Batches / staff / assessments — load once (feed pickers + staff scoping).
   useEffect(() => {
-    if (loading) return;
-    reloadSchedules();
-  }, [selectedBatch]); // eslint-disable-line
+    Promise.all([
+      getBatches().catch(() => []),
+      getStaffProfiles().catch(() => []),
+      getAllAssessments().catch(() => []),
+    ]).then(([bList, sList, asmts]) => {
+      setBatches(bList);
+      setStaffList(sList);
+      setAssessments(asmts);
+    });
+  }, []);
+
+  // Live schedule subscription — re-subscribes when the batch filter changes.
+  useEffect(() => {
+    setLoading(true);
+    const apply = (sch) => { setRawSchedules(sch); setLoading(false); };
+    return selectedBatch === ALL
+      ? subscribeAllSchedules(apply)
+      : subscribeBatchSchedules(selectedBatch, apply);
+  }, [selectedBatch]);
 
   // preload students for the batch chosen in the Add modal
   useEffect(() => {

@@ -207,6 +207,21 @@ export default function Dashboard() {
 
   const isCEOorAdmin = profile?.role === 'ceo';
 
+  // The dashboard is an aggregate/summary screen (many cross-collection KPIs),
+  // so instead of a live listener per metric it auto-refreshes whenever the tab
+  // regains focus or becomes visible again — you never manually reload to see
+  // current numbers. `refreshKey` bumps drive the load effect below.
+  const [refreshKey, setRefreshKey] = useState(0);
+  useEffect(() => {
+    const bump = () => { if (document.visibilityState === 'visible') setRefreshKey(k => k + 1); };
+    window.addEventListener('focus', bump);
+    document.addEventListener('visibilitychange', bump);
+    return () => {
+      window.removeEventListener('focus', bump);
+      document.removeEventListener('visibilitychange', bump);
+    };
+  }, []);
+
   useEffect(() => {
     const load = async () => {
       try {
@@ -298,7 +313,7 @@ export default function Dashboard() {
       }
     };
     load();
-  }, [profile?.email]);
+  }, [profile?.email, refreshKey]);
 
   const handleAcceptRequest = async (req) => {
     setProcessingReq(req.id);

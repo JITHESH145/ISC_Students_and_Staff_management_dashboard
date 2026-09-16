@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getRequests, updateRequest, updateBatch, addNotification, getBatch } from '../firebase/services';
+import { subscribeRequests, updateRequest, updateBatch, addNotification, getBatch } from '../firebase/services';
 import { Loading, Toast, Confirm } from '../components/ui';
 import { Inbox, UserMinus, CalendarDays, ClipboardCheck, KeyRound } from 'lucide-react';
 
@@ -23,15 +23,11 @@ export default function Requests() {
   const [staffFilter, setStaffFilter] = useState('');
   const [dateFilter,  setDateFilter]  = useState('');
 
-  const load = async () => {
+  // Live: requests stream in as staff raise them and update as they're actioned.
+  useEffect(() => {
     setLoading(true);
-    try {
-      setRequests(await getRequests(filter || undefined));
-    } catch { setRequests([]); }
-    setLoading(false);
-  };
-
-  useEffect(() => { load(); }, [filter]);
+    return subscribeRequests(filter || undefined, (r) => { setRequests(r); setLoading(false); });
+  }, [filter]);
 
   const handleAccept = (req) => askConfirm('Accept this removal request?', () => doAccept(req), 'Accept');
 
@@ -57,7 +53,6 @@ export default function Requests() {
         });
       }
       setToast({ message: 'Request accepted.', type: 'success' });
-      load();
     } catch (err) {
       setToast({ message: 'Error: ' + err.message, type: 'error' });
     }
@@ -76,7 +71,6 @@ export default function Requests() {
         });
       }
       setToast({ message: 'Request rejected.', type: 'success' });
-      load();
     } catch (err) {
       setToast({ message: 'Error: ' + err.message, type: 'error' });
     }
