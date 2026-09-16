@@ -153,7 +153,7 @@ export default function Schedule() {
 
   // Calendar
   const [view,          setView]          = useState('day'); // 'day' | 'week' | 'month'
-  const [myOnly,        setMyOnly]        = useState(false);   // staff: show only my classes
+  const [myOnly,        setMyOnly]        = useState(!isCEO);  // staff: default to their own classes first (CEO always sees everyone's)
   const [calDate,       setCalDate]       = useState(new Date());
   const [slotDetail,    setSlotDetail]    = useState(null);
   const [reschedule,    setReschedule]    = useState(null); // { slot, date, time }
@@ -603,8 +603,12 @@ export default function Schedule() {
   // "My Schedule" filter — staff can hide other faculties' classes so they
   // don't miss their own. Matches on uid / email / name for older docs.
   const isMine = (s) => s.facultyUid === profile?.uid || (profile?.email && s.facultyEmail === profile?.email) || (profile?.name && s.facultyName === profile?.name);
-  const visibleSchedules = myOnly ? schedules.filter(isMine) : schedules;
-  const calendarSlots = [...visibleSchedules, ...(myOnly ? [] : assessmentSlots)];
+  // CEO always sees everyone's schedule — the "My classes" toggle (and its
+  // default-on state) only applies to staff, who don't get a way to flip it
+  // back off once isCEO resolves, since the button itself is staff-only.
+  const effectiveMyOnly = myOnly && !isCEO;
+  const visibleSchedules = effectiveMyOnly ? schedules.filter(isMine) : schedules;
+  const calendarSlots = [...visibleSchedules, ...(effectiveMyOnly ? [] : assessmentSlots)];
 
   const filteredParticipants = attParticipants.filter(s => !attSearch || s.name?.toLowerCase().includes(attSearch.toLowerCase()));
   const presentCount = Object.values(attData).filter(v => v.present).length;
