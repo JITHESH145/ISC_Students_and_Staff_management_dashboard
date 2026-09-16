@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { getBatches, getBatchStudents, getFeesByBatch, saveFee, updateBatch } from '../firebase/services';
 import { useAuth } from '../context/AuthContext';
 import { Modal, Toast, Loading, Confirm } from '../components/ui';
-import { Wallet, Plus, Search, Trash2, Edit2, CheckCircle, TrendingUp, AlertTriangle, School } from 'lucide-react';
+import { Wallet, Plus, Search, Trash2, Edit2, CheckCircle, TrendingUp, AlertTriangle, School, Eye } from 'lucide-react';
 
 const METHODS = ['Cash', 'UPI', 'Card', 'Bank Transfer', 'Cheque', 'Other'];
 const inr = (n) => '₹' + Number(n || 0).toLocaleString('en-IN');
@@ -49,15 +50,22 @@ function Ring({ pct, color, size = 56, stroke = 6 }) {
 export default function Fees() {
   const { profile } = useAuth();
   const scope = { role: profile?.role, uid: profile?.uid, email: profile?.email };
+  const navigate = useNavigate();
+  const location = useLocation();
+  // Returning from a student's overview (via the "view overview" action below)
+  // restores the exact filters this page had; any other entry (sidebar nav,
+  // direct link, etc.) starts fresh on "All batches" — see the batches-load
+  // effect below, which only falls back to 'ALL' when nothing was restored.
+  const restoreFees = location.state?.restoreFees;
 
   const [batches, setBatches] = useState([]);
-  const [batchId, setBatchId] = useState('');
+  const [batchId, setBatchId] = useState(restoreFees?.batchId || '');
   const [batchFeeInput, setBatchFeeInput] = useState('');
   const [savingBatchFee, setSavingBatchFee] = useState(false);
   const [rows, setRows] = useState([]);            // { student, fee }
   const [loading, setLoading] = useState(false);
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
+  const [search, setSearch] = useState(restoreFees?.search || '');
+  const [statusFilter, setStatusFilter] = useState(restoreFees?.statusFilter || '');
   const [toast, setToast] = useState(null);
   const [confirmBox, setConfirmBox] = useState(null);
 
@@ -75,7 +83,7 @@ export default function Fees() {
     getBatches().then(bs => {
       const list = (bs || []).filter(b => b.status !== 'archived');
       setBatches(list);
-      setBatchId(prev => prev || list[0]?.id || '');
+      setBatchId(prev => prev || 'ALL');
     }).catch(() => {});
   }, []);
 
@@ -180,6 +188,13 @@ export default function Fees() {
   };
   const closeFee = () => { setFeeStudent(null); setEditingPayId(null); };
 
+  // Jump to the student's profile (Overview tab). Passes the current Fees
+  // filters so the back button can return to this exact view.
+  const viewOverview = (student, e) => {
+    e.stopPropagation();
+    navigate(`/students/${student.id}`, { state: { fromFees: true, restoreFees: { batchId, statusFilter, search } } });
+  };
+
   const addOrUpdatePayment = () => {
     const amount = Number(payForm.amount);
     if (!amount || amount <= 0) { setToast({ message: 'Enter a valid payment amount.', type: 'error' }); return; }
@@ -243,6 +258,7 @@ export default function Fees() {
 
   return (
     <div>
+      <style>{`.fees-ring-btn:hover .fees-ring-btn-hint { opacity: 1 !important; }`}</style>
       <div className="page-header">
         <div>
           <h2 style={{ margin: 0 }}>Fees</h2>
@@ -311,7 +327,14 @@ export default function Fees() {
                 onMouseEnter={e => e.currentTarget.style.boxShadow = 'var(--shadow-md)'}
                 onMouseLeave={e => e.currentTarget.style.boxShadow = ''}>
                 <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-                  <Ring pct={c.pct} color={c.status === 'paid' ? 'var(--green-ink)' : c.status === 'partial' ? 'var(--amber-ink)' : 'var(--red-ink)'} />
+                  <div onClick={(e) => viewOverview(student, e)} title="View student overview" className="fees-ring-btn"
+                    style={{ position: 'relative', flexShrink: 0, borderRadius: '50%', cursor: 'pointer' }}>
+                    <Ring pct={c.pct} color={c.status === 'paid' ? 'var(--green-ink)' : c.status === 'partial' ? 'var(--amber-ink)' : 'var(--red-ink)'} />
+                    <div className="fees-ring-btn-hint" style={{ position: 'absolute', inset: 0, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      background: 'rgba(15,23,42,.55)', opacity: 0, transition: 'opacity .15s' }}>
+                      <Eye size={18} color="#fff" />
+                    </div>
+                  </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 14.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{student.name || '—'}</div>
                     <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{student.phone || '—'}</div>

@@ -445,6 +445,7 @@ export default function StudentProfile() {
             // If we came from a batch's student list, return to that batch (its
             // detail is state-based, so navigate(-1) alone lands on the batch list).
             if (location.state?.fromBatchId) navigate('/batches', { state: { batchId: location.state.fromBatchId, tab: 'students' } });
+            else if (location.state?.fromFees) navigate('/fees', { state: { restoreFees: location.state.restoreFees } });
             else navigate(-1);
           }}>
             <ArrowLeft size={16}/>
