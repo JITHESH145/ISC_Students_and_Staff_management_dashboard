@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { subscribeStudents, searchStudents, deleteStudent, addStudent, assignStudentsToBatch, getBatches, getStaffProfiles } from '../firebase/services';
+import { subscribeStudents, searchStudents, deleteStudent, addStudent, assignStudentsToBatch, syncStudentCoursesFromBatches, getBatches, getStaffProfiles } from '../firebase/services';
 import { Modal, Toast, Avatar, StatusBadge, Loading, Confirm, FormRow } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { Plus, Search, Eye, Trash2, Upload, ChevronRight, ChevronLeft, Users, AlertTriangle } from 'lucide-react';
@@ -28,6 +28,8 @@ export default function StudentsPage() {
   const [fixBatchId, setFixBatchId]   = useState('');
   const [fixSelected, setFixSelected] = useState([]);
   const [fixing, setFixing]           = useState(false);
+  const [courseFixOpen, setCourseFixOpen] = useState(false);
+  const [syncingCourses, setSyncingCourses] = useState(false);
   const [form, setForm] = useState({
     name:'', phone:'', parentPhone:'', email:'',
     course:'', batchId:'', joiningDate:todayStr(), location:'',
@@ -126,6 +128,28 @@ export default function StudentsPage() {
     } finally { setFixing(false); }
   };
 
+  // Students in a valid batch whose stored course has drifted from the
+  // batch's own course (e.g. left over from the old free-text course field).
+  const courseMismatchStudents = batches.length
+    ? liveStudents.filter(s => {
+        const batch = batches.find(b => b.id === s.batchId);
+        return batch && batch.course && (s.course || '') !== batch.course;
+      })
+    : [];
+  // What the list should show for a student's course — the batch's course
+  // wins when the student is in a valid batch, even before the sync runs.
+  const courseFor = (s) => batches.find(b => b.id === s.batchId)?.course || s.course || '—';
+  const handleSyncCourses = async () => {
+    setSyncingCourses(true);
+    try {
+      const { updated } = await syncStudentCoursesFromBatches(courseMismatchStudents, batches);
+      setToast({ message: `${updated} student${updated === 1 ? '' : 's'} updated.`, type: 'success' });
+      setCourseFixOpen(false);
+    } catch {
+      setToast({ message: 'Failed to sync courses.', type: 'error' });
+    } finally { setSyncingCourses(false); }
+  };
+
   return (
     <div>
       <div className="page-header">
@@ -159,6 +183,17 @@ export default function StudentsPage() {
             <b>{noBatchStudents.length}</b> student{noBatchStudents.length > 1 ? 's are' : ' is'} not in any batch, so their course and course flow are wrong.
           </span>
           <button className="btn btn-primary btn-sm" onClick={openFix}>Assign to batch</button>
+        </div>
+      )}
+
+      {/* Students whose stored course doesn't match their batch's course — CEO can re-sync */}
+      {isCEOorAdmin && !batchFilter && courseMismatchStudents.length > 0 && (
+        <div style={{ padding: '10px 14px', background: '#FFFBEB', border: '1px solid #FDE68A', borderRadius: 8, fontSize: 13, color: '#92400E', marginBottom: 14, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <AlertTriangle size={15} style={{ flexShrink: 0 }} />
+          <span style={{ flex: 1, minWidth: 200 }}>
+            <b>{courseMismatchStudents.length}</b> student{courseMismatchStudents.length > 1 ? 's have' : ' has'} a course that doesn't match their batch (e.g. 'Other').
+          </span>
+          <button className="btn btn-primary btn-sm" onClick={() => setCourseFixOpen(true)}>Fix courses</button>
         </div>
       )}
 
@@ -228,7 +263,7 @@ export default function StudentsPage() {
                   </div>
                 </td>
                 <td>
-                  <div style={{ fontSize: 13 }}>{s.course || '—'}</div>
+                  <div style={{ fontSize: 13 }}>{courseFor(s)}</div>
                   <div style={{ fontSize: 11, color: 'var(--muted)' }}>{batchName(s.batchId)}</div>
                 </td>
                 <td style={{ fontSize: 13 }}>{s.phone || '—'}</td>
@@ -349,6 +384,13 @@ export default function StudentsPage() {
       )}
 
       {deleting && <Confirm message="Delete this student? This cannot be undone." onConfirm={handleDelete} onCancel={() => setDeleting(null)} />}
+      {courseFixOpen && (
+        <Confirm
+          message={`Set the course of ${courseMismatchStudents.length} students to their batch's course?`}
+          onConfirm={handleSyncCourses}
+          onCancel={() => !syncingCourses && setCourseFixOpen(false)}
+        />
+      )}
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
     </div>
   );

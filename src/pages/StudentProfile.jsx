@@ -197,6 +197,9 @@ export default function StudentProfile() {
   useEffect(() => { load(); /* eslint-disable-next-line */ }, [id, refreshKey]);
 
   const batchName = (bid) => batches.find(b => b.id === bid)?.name || '—';
+  // The batch is the source of truth for course; fall back to the student's
+  // own course field if the batch is missing or has none set.
+  const courseFor = (s) => batches.find(b => b.id === s?.batchId)?.course || s?.course || '—';
 
   const fmt = (ts) => {
     if (!ts) return '—';
@@ -465,7 +468,7 @@ export default function StudentProfile() {
           <div>
             <h2 style={{ fontSize:20 }}>{student.name}</h2>
             <div style={{ fontSize:12, color:'#6B7280' }}>
-              {batchName(student.batchId)} · {student.course}
+              {batchName(student.batchId)} · {courseFor(student)}
               {student.classplusId && ` · ${student.classplusId}`}
             </div>
           </div>
@@ -507,7 +510,7 @@ export default function StudentProfile() {
                 <div>
                   <div style={{ fontSize:17, fontWeight:700 }}>{student.name}</div>
                   {student.classStd && <div style={{ fontSize:12, color:'#6B7280' }}>{student.classStd}</div>}
-                  <div style={{ fontSize:12, color:'#6B7280' }}>{student.course} · {batchName(student.batchId)}</div>
+                  <div style={{ fontSize:12, color:'#6B7280' }}>{courseFor(student)} · {batchName(student.batchId)}</div>
                 </div>
               </div>
 
