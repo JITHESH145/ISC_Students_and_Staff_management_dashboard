@@ -1,12 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { subscribeStudents, searchStudents, deleteStudent, addStudent, getBatches, getStaffProfiles } from '../firebase/services';
+import { subscribeStudents, searchStudents, deleteStudent, addStudent, assignStudentsToBatch, getBatches, getStaffProfiles } from '../firebase/services';
 import { Modal, Toast, Avatar, StatusBadge, Loading, Confirm, FormRow } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
-import { Plus, Search, Eye, Trash2, Upload, ChevronRight, ChevronLeft, Users } from 'lucide-react';
+import { Plus, Search, Eye, Trash2, Upload, ChevronRight, ChevronLeft, Users, AlertTriangle } from 'lucide-react';
 import { useNavigate as useNav } from 'react-router-dom';
 
-const COURSES = ['Python','Data Science','Web Development','Machine Learning','Digital Marketing','UI/UX Design','Cyber Security','Other'];
 const STATUSES = ['active','moderate','at-risk','dropped'];
 const todayStr = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
 
@@ -25,6 +24,10 @@ export default function StudentsPage() {
   const [toast, setToast]             = useState(null);
   const [deleting, setDeleting]       = useState(null);
   const [saving, setSaving]           = useState(false);
+  const [fixOpen, setFixOpen]         = useState(false);
+  const [fixBatchId, setFixBatchId]   = useState('');
+  const [fixSelected, setFixSelected] = useState([]);
+  const [fixing, setFixing]           = useState(false);
   const [form, setForm] = useState({
     name:'', phone:'', parentPhone:'', email:'',
     course:'', batchId:'', joiningDate:todayStr(), location:'',
@@ -77,9 +80,13 @@ export default function StudentsPage() {
 
   const handleAdd = async (e) => {
     e.preventDefault();
+    // The batch decides the course (and course flow) — same as adding from
+    // the Batches page, so both entry points produce identical students.
+    const batch = batches.find(b => b.id === form.batchId);
+    if (!batch) { setToast({ message: 'Select a batch.', type: 'error' }); return; }
     setSaving(true);
     try {
-      await addStudent(form);
+      await addStudent({ ...form, batchName: batch.name || '', course: batch.course || '', courseDurationMonths: batch.courseDurationMonths || '' });
       setToast({ message: 'Student added!', type: 'success' });
       setShowModal(false);
       setForm({ name:'',phone:'',parentPhone:'',email:'',course:'',batchId:'',joiningDate:todayStr(),location:'',education:'',staffAssigned:'',classplusId:'',status:'active',notes:'' });
@@ -97,6 +104,27 @@ export default function StudentsPage() {
   };
 
   const batchName = (id) => batches.find(b => b.id === id)?.name || '—';
+  const formBatch = batches.find(b => b.id === form.batchId);
+
+  // Students whose batchId doesn't resolve to a batch (added without one, or
+  // their batch was removed). They show "—" and fall back to the default flow.
+  const noBatchStudents = batches.length
+    ? liveStudents.filter(s => !s.batchId || !batches.some(b => b.id === s.batchId))
+    : [];
+  const openFix = () => { setFixSelected(noBatchStudents.map(s => s.id)); setFixBatchId(''); setFixOpen(true); };
+  const handleFix = async () => {
+    const batch = batches.find(b => b.id === fixBatchId);
+    const chosen = noBatchStudents.filter(s => fixSelected.includes(s.id));
+    if (!batch || !chosen.length) return;
+    setFixing(true);
+    try {
+      await assignStudentsToBatch(chosen, batch);
+      setToast({ message: `${chosen.length} student${chosen.length > 1 ? 's' : ''} moved to ${batch.name}.`, type: 'success' });
+      setFixOpen(false);
+    } catch {
+      setToast({ message: 'Failed to assign batch.', type: 'error' });
+    } finally { setFixing(false); }
+  };
 
   return (
     <div>
@@ -120,6 +148,17 @@ export default function StudentsPage() {
       {totalCount > 500 && (
         <div style={{ padding: '8px 14px', background: '#F0FDF4', borderRadius: 8, fontSize: 12, color: '#065F46', marginBottom: 14, display: 'flex', gap: 8, alignItems: 'center' }}>
           <Users size={13} /> Showing 50 students at a time. Use search or filters to find specific students instantly.
+        </div>
+      )}
+
+      {/* Students without a valid batch — CEO can move them into one */}
+      {isCEOorAdmin && !batchFilter && noBatchStudents.length > 0 && (
+        <div style={{ padding: '10px 14px', background: '#FFFBEB', border: '1px solid #FDE68A', borderRadius: 8, fontSize: 13, color: '#92400E', marginBottom: 14, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <AlertTriangle size={15} style={{ flexShrink: 0 }} />
+          <span style={{ flex: 1, minWidth: 200 }}>
+            <b>{noBatchStudents.length}</b> student{noBatchStudents.length > 1 ? 's are' : ' is'} not in any batch, so their course and course flow are wrong.
+          </span>
+          <button className="btn btn-primary btn-sm" onClick={openFix}>Assign to batch</button>
         </div>
       )}
 
@@ -240,15 +279,13 @@ export default function StudentsPage() {
               <div className="form-group"><label className="form-label">Email</label><input className="form-input" type="email" value={form.email} onChange={e => setForm({...form, email: e.target.value})} /></div>
             </FormRow>
             <FormRow>
-              <div className="form-group"><label className="form-label">Course *</label>
-                <select className="form-input" required value={form.course} onChange={e => setForm({...form, course: e.target.value})}>
-                  <option value="">Select</option>{COURSES.map(c=><option key={c}>{c}</option>)}
+              <div className="form-group"><label className="form-label">Batch *</label>
+                <select className="form-input" required value={form.batchId} onChange={e => setForm({...form, batchId: e.target.value})}>
+                  <option value="">Select batch</option>{batches.map(b=><option key={b.id} value={b.id}>{b.name}{b.course ? ` — ${b.course}` : ''}</option>)}
                 </select>
               </div>
-              <div className="form-group"><label className="form-label">Batch</label>
-                <select className="form-input" value={form.batchId} onChange={e => setForm({...form, batchId: e.target.value})}>
-                  <option value="">Select batch</option>{batches.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}
-                </select>
+              <div className="form-group"><label className="form-label">Course</label>
+                <input className="form-input" readOnly value={formBatch ? (formBatch.course || '—') : ''} placeholder="Set by the batch" style={{ background: 'var(--n-50, #F9FAFB)', color: 'var(--text-sub)' }} />
               </div>
             </FormRow>
             <FormRow>
@@ -272,6 +309,42 @@ export default function StudentsPage() {
               <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Saving...' : 'Add Student'}</button>
             </div>
           </form>
+        </Modal>
+      )}
+
+      {fixOpen && (
+        <Modal title="Assign students to a batch" onClose={() => setFixOpen(false)} wide>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ fontSize: 13, color: 'var(--text-sub)' }}>
+              The selected students get the batch's course, course flow and staff. Progress already recorded is kept.
+            </div>
+            <div className="form-group"><label className="form-label">Batch *</label>
+              <select className="form-input" value={fixBatchId} onChange={e => setFixBatchId(e.target.value)}>
+                <option value="">Select batch</option>{batches.map(b => <option key={b.id} value={b.id}>{b.name}{b.course ? ` — ${b.course}` : ''}</option>)}
+              </select>
+            </div>
+            <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, fontWeight: 600 }}>
+              <input type="checkbox" checked={fixSelected.length === noBatchStudents.length}
+                onChange={e => setFixSelected(e.target.checked ? noBatchStudents.map(s => s.id) : [])} />
+              Select all ({fixSelected.length}/{noBatchStudents.length})
+            </label>
+            <div style={{ maxHeight: 320, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 8 }}>
+              {noBatchStudents.map(s => (
+                <label key={s.id} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '8px 12px', borderBottom: '1px solid var(--border)', fontSize: 13, cursor: 'pointer' }}>
+                  <input type="checkbox" checked={fixSelected.includes(s.id)}
+                    onChange={e => setFixSelected(e.target.checked ? [...fixSelected, s.id] : fixSelected.filter(x => x !== s.id))} />
+                  <span style={{ flex: 1, fontWeight: 500 }}>{s.name}</span>
+                  <span style={{ color: 'var(--muted)', fontSize: 12 }}>{s.course || '—'} · {s.phone || ''}</span>
+                </label>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button type="button" className="btn btn-ghost" onClick={() => setFixOpen(false)}>Cancel</button>
+              <button type="button" className="btn btn-primary" disabled={fixing || !fixBatchId || !fixSelected.length} onClick={handleFix}>
+                {fixing ? 'Saving...' : `Assign ${fixSelected.length} student${fixSelected.length === 1 ? '' : 's'}`}
+              </button>
+            </div>
+          </div>
         </Modal>
       )}
 

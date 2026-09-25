@@ -167,6 +167,22 @@ export const updateStudent = async (id, data) => {
   return updateDoc(doc(db, 'students', id), payload);
 };
 
+// Put students into a batch (CEO-only per rules). The batch is the source of
+// truth for course / course flow, so course, batchName and staff scope all
+// follow it; courseDurationMonths is only filled when the student has none.
+export const assignStudentsToBatch = async (students, batch) => {
+  const staffIds = computeBatchStaffIds(batch);
+  await Promise.all(students.map(s => updateDoc(doc(db, 'students', s.id), {
+    batchId: batch.id,
+    batchName: batch.name || '',
+    course: batch.course || '',
+    ...(!s.courseDurationMonths && batch.courseDurationMonths ? { courseDurationMonths: batch.courseDurationMonths } : {}),
+    staffIds,
+    updatedAt: serverTimestamp(),
+  })));
+  return { updated: students.length };
+};
+
 export const deleteStudent = async (id) => deleteDoc(doc(db, 'students', id));
 
 export const bulkAddStudents = async (arr) => {
