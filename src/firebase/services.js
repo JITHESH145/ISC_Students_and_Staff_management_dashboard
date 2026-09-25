@@ -183,6 +183,25 @@ export const assignStudentsToBatch = async (students, batch) => {
   return { updated: students.length };
 };
 
+// Re-stamp course/batchName from the batch onto students whose values have
+// drifted (e.g. added before Batch decided the course). Batches with no
+// course are skipped since there's nothing authoritative to copy.
+export const syncStudentCoursesFromBatches = async (students, batches) => {
+  const updates = students.reduce((acc, s) => {
+    const batch = batches.find(b => b.id === s.batchId);
+    if (!batch || !batch.course) return acc;
+    if ((s.course || '') === batch.course && (s.batchName || '') === (batch.name || '')) return acc;
+    acc.push(updateDoc(doc(db, 'students', s.id), {
+      course: batch.course || '',
+      batchName: batch.name || '',
+      updatedAt: serverTimestamp(),
+    }));
+    return acc;
+  }, []);
+  await Promise.all(updates);
+  return { updated: updates.length };
+};
+
 export const deleteStudent = async (id) => deleteDoc(doc(db, 'students', id));
 
 export const bulkAddStudents = async (arr) => {
