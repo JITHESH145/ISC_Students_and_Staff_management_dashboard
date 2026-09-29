@@ -86,7 +86,7 @@ export default function StudentProfile() {
   const { id }       = useParams();
   const navigate     = useNavigate();
   const location     = useLocation();
-  const { profile }  = useAuth();
+  const { user, profile } = useAuth();
 
   const [student,     setStudent]     = useState(null);
   const [batches,     setBatches]     = useState([]);
@@ -268,12 +268,25 @@ export default function StudentProfile() {
   const handleSaveNote = async () => {
     if (!newNote.trim()) return;
     setSavingNote(true);
-    await addFollowUp({ studentId: id, studentName: student.name, note: newNote, addedBy: profile?.name || 'Staff' });
-    setNewNote('');
-    setToast({ message: 'Follow-up saved!', type: 'success' });
-    const upd = await getFollowUps(id, { role: profile?.role, uid: profile?.uid, email: profile?.email });
-    setFollowups(upd);
-    setSavingNote(false);
+    try {
+      // assignedByEmail is required by the followups create rule — without it
+      // the write is rejected with permission-denied.
+      await addFollowUp({
+        studentId: id, studentName: student.name, note: newNote,
+        addedBy: profile?.name || 'Staff',
+        assignedBy: profile?.name || 'Staff',
+        assignedByEmail: user?.email,
+      });
+      setNewNote('');
+      setToast({ message: 'Follow-up saved!', type: 'success' });
+      const upd = await getFollowUps(id, { role: profile?.role, uid: profile?.uid, email: user?.email });
+      setFollowups(upd);
+    } catch (err) {
+      if (import.meta.env.DEV) console.error('Save follow-up failed:', err);
+      setToast({ message: 'Could not save follow-up. Please try again.', type: 'error' });
+    } finally {
+      setSavingNote(false);
+    }
   };
 
   // Save edit
