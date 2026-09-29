@@ -19,6 +19,7 @@ export default function FollowUps() {
   const [completionNote, setCompletionNote] = useState('');
   const [toast, setToast]           = useState(null);
   const [saving, setSaving]         = useState(false);
+  const [expanded, setExpanded]     = useState(() => new Set());
   const [form, setForm] = useState({
     batchId: '',
     studentId: '', studentName: '',
@@ -143,6 +144,36 @@ export default function FollowUps() {
     return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
   };
 
+  const toggleExpanded = (id) => setExpanded(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+
+  const priorityBadge = (f) => f.priority === 'urgent' ? <span className="badge badge-red">Urgent</span>
+    : f.priority === 'high' ? <span className="badge badge-amber">High</span>
+    : <span className="badge badge-gray">Normal</span>;
+
+  const statusBadge = (f) => f.completed
+    ? <span className="badge badge-green"><CheckCircle size={11} style={{ marginRight: 3 }} />Done</span>
+    : <span className="badge badge-amber"><Clock size={11} style={{ marginRight: 3 }} />Pending</span>;
+
+  // Long notes are clamped to 3 lines; tap to show the rest.
+  const noteBlock = (f) => (
+    <>
+      <div className={expanded.has(f.id) ? undefined : 'clamp-3'}
+        onClick={() => toggleExpanded(f.id)}
+        style={{ cursor: 'pointer', overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>
+        {f.note}
+      </div>
+      {f.completed && f.completionNote && (
+        <div style={{ marginTop: 5, padding: '5px 9px', background: 'var(--green-soft)', color: 'var(--green-ink)', borderRadius: 7, fontSize: 11.5, lineHeight: 1.4, overflowWrap: 'anywhere' }}>
+          <strong>Outcome:</strong> {f.completionNote}
+        </div>
+      )}
+    </>
+  );
+
   if (loading) return <Loading />;
 
   const pendingCount = followups.filter(f => !f.completed).length;
@@ -201,7 +232,37 @@ export default function FollowUps() {
         })}
       </div>
 
-      <div className="table-container">
+      {/* Phones: one card per follow-up instead of a sideways-scrolling table */}
+      <div className="only-mobile">
+        {filtered.length === 0 && (
+          <div className="card" style={{ textAlign: 'center', color: 'var(--muted)', padding: 32 }}>No follow-ups found.</div>
+        )}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {filtered.map(f => (
+            <div key={f.id} className="card" style={{ padding: 14 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                <Avatar name={f.studentName || '?'} size="sm" />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.studentName}</div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    by {f.assignedBy}{isCEOorAdmin && f.assignedTo ? ` → ${f.assignedTo}` : ''} · {formatDate(f.createdAt)}
+                  </div>
+                </div>
+                {statusBadge(f)}
+              </div>
+              <div style={{ fontSize: 13, lineHeight: 1.45 }}>{noteBlock(f)}</div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginTop: 10 }}>
+                {priorityBadge(f)}
+                {!f.completed && (
+                  <button className="btn btn-ghost btn-sm" onClick={() => setCompleting(f)}>Log & Close</button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="table-container only-desktop">
         <table>
           <thead>
             <tr>
@@ -230,25 +291,10 @@ export default function FollowUps() {
                   </div>
                 </td>
                 {isCEOorAdmin && <td style={{ fontSize: 13 }}>{f.assignedTo || '—'}</td>}
-                <td style={{ fontSize: 13, maxWidth: 260 }}>
-                  {f.note}
-                  {f.completed && f.completionNote && (
-                    <div style={{ marginTop: 5, padding: '5px 9px', background: 'var(--green-soft)', color: 'var(--green-ink)', borderRadius: 7, fontSize: 11.5, lineHeight: 1.4 }}>
-                      <strong>Outcome:</strong> {f.completionNote}
-                    </div>
-                  )}
-                </td>
-                <td>
-                  {f.priority === 'urgent' ? <span className="badge badge-red">Urgent</span>
-                   : f.priority === 'high' ? <span className="badge badge-amber">High</span>
-                   : <span className="badge badge-gray">Normal</span>}
-                </td>
-                <td style={{ fontSize: 11, color: 'var(--muted)' }}>{formatDate(f.createdAt)}</td>
-                <td>
-                  {f.completed
-                    ? <span className="badge badge-green"><CheckCircle size={11} style={{ marginRight: 3 }} />Done</span>
-                    : <span className="badge badge-amber"><Clock size={11} style={{ marginRight: 3 }} />Pending</span>}
-                </td>
+                <td style={{ fontSize: 13, maxWidth: 320 }}>{noteBlock(f)}</td>
+                <td>{priorityBadge(f)}</td>
+                <td style={{ fontSize: 11, color: 'var(--muted)', whiteSpace: 'nowrap' }}>{formatDate(f.createdAt)}</td>
+                <td>{statusBadge(f)}</td>
                 <td>
                   {!f.completed && (
                     <button className="btn btn-ghost btn-sm" onClick={() => setCompleting(f)}>Log & Close</button>
@@ -351,7 +397,7 @@ export default function FollowUps() {
         <Modal title="Log & Complete Follow-Up" onClose={() => setCompleting(null)} persistent>
           <div style={{ padding: '10px 14px', background: 'var(--bg)', borderRadius: 8, marginBottom: 14 }}>
             <div style={{ fontWeight: 500 }}>{completing.studentName}</div>
-            <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>{completing.note}</div>
+            <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4, overflowWrap: 'anywhere', whiteSpace: 'pre-wrap', maxHeight: 160, overflowY: 'auto' }}>{completing.note}</div>
           </div>
           <div className="form-group">
             <label className="form-label">What did you do? *</label>
