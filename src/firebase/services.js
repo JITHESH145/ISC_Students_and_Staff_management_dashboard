@@ -267,11 +267,12 @@ export const getStudents = async (scope = null) => {
 };
 
 // ── Follow-ups ─────────────────────────────────────────────────
-// Staff may only read follow-ups assigned to them, so the per-student
+// Staff may only read follow-ups assigned to or by them, so the per-student
 // history query must include their email clause to be provable.
 export const getFollowUps = async (studentId, scope = null) => {
   const q = (scope && !isCeoScope(scope))
-    ? query(collection(db,'followups'), where('studentId','==',studentId), where('assignedToEmail','==',scope.email))
+    ? query(collection(db,'followups'), where('studentId','==',studentId),
+        or(where('assignedToEmail','==',scope.email), where('assignedByEmail','==',scope.email)))
     : query(collection(db,'followups'), where('studentId','==',studentId));
   const snap = await getDocs(q);
   return snap.docs.map(d => ({ id: d.id, ...d.data() }))
