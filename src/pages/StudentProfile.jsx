@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import {
   getStudent, updateStudent, getBatches,
-  getFollowUps, addFollowUp, getAssessments, addAssessment,
+  getFollowUps, addFollowUpNote, getAssessments, addAssessment,
   getStaffProfiles, updateWeakSubjects, updateCourseFlowStep, addNotification,
   getStudentReports, getStudentAttendanceSummary, getBatchTasks,
   getStudentBatchAssessments,
@@ -271,7 +271,7 @@ export default function StudentProfile() {
     try {
       // assignedByEmail is required by the followups create rule — without it
       // the write is rejected with permission-denied.
-      await addFollowUp({
+      await addFollowUpNote({
         studentId: id, studentName: student.name, note: newNote,
         addedBy: profile?.name || 'Staff',
         assignedBy: profile?.name || 'Staff',
@@ -719,8 +719,8 @@ export default function StudentProfile() {
               <h3 style={{ fontSize:14, fontWeight:600, marginBottom:12 }}>Recent Follow-Ups</h3>
               {followups.slice(0,3).map(f => (
                 <div key={f.id} style={{ padding:'8px 0', borderBottom:'1px solid #F3F4F6' }}>
-                  <div style={{ fontSize:12, color:'#9CA3AF', marginBottom:2 }}>{fmt(f.createdAt)} · {f.addedBy}</div>
-                  <div style={{ fontSize:13 }}>{f.note}</div>
+                  <div style={{ fontSize:12, color:'#9CA3AF', marginBottom:2 }}>{fmt(f.createdAt)} · {f.addedBy || f.assignedBy}</div>
+                  <div style={{ fontSize:13, overflowWrap:'anywhere', display:'-webkit-box', WebkitLineClamp:3, WebkitBoxOrient:'vertical', overflow:'hidden' }}>{f.note}</div>
                 </div>
               ))}
               {followups.length === 0 && <div style={{ fontSize:13, color:'#9CA3AF' }}>No follow-ups yet.</div>}
@@ -1104,9 +1104,12 @@ export default function StudentProfile() {
                     <div style={{ width:10, height:10, borderRadius:'50%', background:'#E53935', flexShrink:0, marginTop:4 }}/>
                     {i < followups.length-1 && <div style={{ width:1, flex:1, background:'#E5E7EB', margin:'4px 0' }}/>}
                   </div>
-                  <div style={{ flex:1, paddingBottom:4 }}>
-                    <div style={{ fontSize:11, color:'#9CA3AF', marginBottom:3 }}>{fmt(f.createdAt)} · {f.addedBy}</div>
-                    <div style={{ fontSize:13 }}>{f.note}</div>
+                  <div style={{ flex:1, minWidth:0, paddingBottom:4 }}>
+                    <div style={{ fontSize:11, color:'#9CA3AF', marginBottom:3 }}>
+                      {fmt(f.createdAt)} · {f.addedBy || f.assignedBy}
+                      {f.assignedTo && <> → {f.assignedTo}</>}
+                    </div>
+                    <div style={{ fontSize:13, overflowWrap:'anywhere', whiteSpace:'pre-wrap' }}>{f.note}</div>
                   </div>
                 </div>
               ))}

@@ -156,6 +156,13 @@ html, body, #root { height: 100%; font-family: var(--font-body); background: var
    layout viewport and the responsive breakpoints below stop firing. */
 html, body, #root { max-width: 100%; overflow-x: hidden; }
 #root { width: 100%; }
+/* Grid items default to min-width:auto, so one long unbreakable line (a
+   nowrap/ellipsis note, a wide table) stretches its column past the screen and
+   the ellipsis never kicks in. Let inline-grid cells shrink to their track. */
+[style*="grid-template-columns"] > * { min-width: 0; }
+/* Clamp long free text (follow-up notes etc.) to 3 lines. */
+.clamp-3 { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.only-mobile { display: none !important; }
 /* Stop mobile browsers auto-inflating text (keeps the responsive layout honest). */
 html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 h1,h2,h3,h4 { font-family: var(--font-display); color: var(--text); letter-spacing: -0.01em; }
@@ -417,6 +424,9 @@ tbody tr:hover { background:var(--surface-hover); }
   .mobile-stack .btn { width: 100%; }
   /* Collapse an inline multi-column grid to a single column on phones. */
   .mobile-1col { grid-template-columns: 1fr !important; }
+  /* Swap a wide table for a card list on phones. */
+  .only-mobile { display: block !important; }
+  .only-desktop { display: none !important; }
   /* Broad net: any inline two/three-column "1fr 1fr" grid (React serializes
      gridTemplateColumns to this) stacks to a single column on phones. Auto-fit
      grids and calendars use other patterns and are unaffected. */
