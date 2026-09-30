@@ -185,8 +185,8 @@ export default function FollowUps() {
         try {
           await deleteFollowUpNote(n.id);
           setToast({ message: 'Note deleted.', type: 'info' });
-        } catch {
-          setToast({ message: 'Could not delete the note.', type: 'error' });
+        } catch (err) {
+          setToast({ message: err?.code === 'permission-denied' ? 'Deleting notes is CEO-only right now. Ask the CEO to delete it.' : 'Could not delete the note.', type: 'error' });
         }
       },
     });
