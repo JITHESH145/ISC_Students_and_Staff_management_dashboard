@@ -267,15 +267,20 @@ export const getStudents = async (scope = null) => {
 };
 
 // ── Follow-ups ─────────────────────────────────────────────────
-// Staff may only read follow-ups assigned to or by them, so the per-student
-// history query must include their email clause to be provable.
+// Staff may only read follow-ups assigned to or by them, so their query must
+// carry that email clause to be provable. The studentId + OR form failed for
+// staff in production, so staff reuse the tracker's query (which works) and
+// the student is filtered in JS.
 export const getFollowUps = async (studentId, scope = null) => {
-  const q = (scope && !isCeoScope(scope))
-    ? query(collection(db,'followups'), where('studentId','==',studentId),
-        or(where('assignedToEmail','==',scope.email), where('assignedByEmail','==',scope.email)))
+  const staff = scope && !isCeoScope(scope);
+  const q = staff
+    ? query(collection(db,'followups'),
+        or(where('assignedToEmail','==',scope.email), where('assignedByEmail','==',scope.email)),
+        limit(300))
     : query(collection(db,'followups'), where('studentId','==',studentId));
   const snap = await getDocs(q);
   return snap.docs.map(d => ({ id: d.id, ...d.data() }))
+    .filter(f => !staff || f.studentId === studentId)
     .sort((a,b) => (b.createdAt?.seconds||0) - (a.createdAt?.seconds||0));
 };
 
