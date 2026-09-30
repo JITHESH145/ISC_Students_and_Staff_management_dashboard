@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ChevronRight, AlertTriangle, BookOpen } from 'lucide-react';
 import { Modal, FormRow } from '../ui';
-import { COURSE_FEATURES, ALL_FEATURES_ON, COURSE_COLORS, courseColor } from '../../lib/courses';
+import { COURSE_FEATURES, ALL_FEATURES_ON, COURSE_COLORS, courseColor, courseOfBatch, NO_COURSE } from '../../lib/courses';
 
 // ── Course banner (level 1 of Batches / Students) ─────────────
 export function CourseBanner({ course, batchCount, activeCount, studentCount, onClick }) {
@@ -59,6 +59,23 @@ export function CourseCrumb({ course, onBack, children }) {
       </span>
       {children}
     </div>
+  );
+}
+
+// ── Course filter dropdown (sits in front of a batch dropdown) ─
+// Lists only courses that have at least one of `batches`, plus "Not linked
+// to a course" when some batches have none. Renders nothing when there are
+// no courses yet, so pages look exactly as before courses existed.
+export function CourseSelect({ courses, batches, value, onChange, allLabel = 'All courses', style, className = 'form-input' }) {
+  const used = courses.filter(c => batches.some(b => b.courseId === c.id));
+  const hasUnlinked = batches.some(b => !courseOfBatch(b, courses));
+  if (!used.length) return null;
+  return (
+    <select className={className} style={{ width: 'auto', ...style }} value={value} onChange={e => onChange(e.target.value)} aria-label="Filter by course">
+      <option value="">{allLabel}</option>
+      {used.map(c => <option key={c.id} value={c.id}>{c.name}{c.status === 'archived' ? ' (archived)' : ''}</option>)}
+      {hasUnlinked && <option value={NO_COURSE}>Not linked to a course</option>}
+    </select>
   );
 }
 

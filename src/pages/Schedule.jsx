@@ -8,7 +8,8 @@ import {
   saveClassReport, updateClassReport, getSessionReports, deleteSessionReports, getStudentReports,
   getAllAssessments, notifyStaff, subscribeCourses,
 } from '../firebase/services';
-import { hasFeature, courseOfBatch } from '../lib/courses';
+import { hasFeature, courseOfBatch, batchesInCourse } from '../lib/courses';
+import { CourseSelect } from '../components/courses';
 import { Modal, Toast, Loading, Confirm } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -145,6 +146,7 @@ export default function Schedule() {
   const slotHas = (slot, key) => !slot?.batchId
     || hasFeature(courseOfBatch(batches.find(b => b.id === slot.batchId), courses), key);
   const [selectedBatch, setSelectedBatch] = useState(ALL); // default: show everything
+  const [schedCourse,   setSchedCourse]   = useState('');  // '' = all courses
   const [rawSchedules,  setRawSchedules]  = useState([]);
   const [assessments,   setAssessments]   = useState([]);
   const [staffList,     setStaffList]     = useState([]);
@@ -198,11 +200,13 @@ export default function Schedule() {
   const [attView,        setAttView]        = useState('session'); // 'session' | 'student'
   const [attStudentSearch, setAttStudentSearch] = useState('');
   const [attBatchFilter, setAttBatchFilter] = useState('');
+  const [attCourse,      setAttCourse]      = useState('');
   const [attExpanded,    setAttExpanded]    = useState({});   // row id → open
   const [attStudentInfo, setAttStudentInfo] = useState({});   // studentId → { phone, batch }
 
   // Schedule Coverage (tab) — which students got a class scheduled vs missed
   const [covBatch,     setCovBatch]     = useState('');
+  const [covCourse,    setCovCourse]    = useState('');
   const [covWindow,    setCovWindow]    = useState('7');   // 'today' | '7' | '30'
   const [covStudents,  setCovStudents]  = useState([]);
   const [covSchedules, setCovSchedules] = useState([]);
@@ -597,8 +601,12 @@ export default function Schedule() {
   if (loading) return <Loading />;
 
   // Planned assessments become read-only calendar entries so staff can see them.
+  const courseBatchList = batchesInCourse(batches, courses, schedCourse);
+  const courseBatchIds  = schedCourse ? new Set(courseBatchList.map(b => b.id)) : null;
+  const inCourse = (x) => !courseBatchIds || courseBatchIds.has(x.batchId);
+  const courseSchedules = schedules.filter(inCourse);
   const assessmentSlots = assessments
-    .filter(a => a.date && (selectedBatch === ALL || a.batchId === selectedBatch))
+    .filter(a => a.date && (selectedBatch === ALL || a.batchId === selectedBatch) && inCourse(a))
     .map(a => ({
       id: 'assess-' + a.id, _assessment: true, type: 'assessment',
       title: a.title || a.testName || 'Assessment',
@@ -614,7 +622,7 @@ export default function Schedule() {
   // default-on state) only applies to staff, who don't get a way to flip it
   // back off once isCEO resolves, since the button itself is staff-only.
   const effectiveMyOnly = myOnly && !isCEO;
-  const visibleSchedules = effectiveMyOnly ? schedules.filter(isMine) : schedules;
+  const visibleSchedules = effectiveMyOnly ? courseSchedules.filter(isMine) : courseSchedules;
   const calendarSlots = [...visibleSchedules, ...(effectiveMyOnly ? [] : assessmentSlots)];
 
   const filteredParticipants = attParticipants.filter(s => !attSearch || s.name?.toLowerCase().includes(attSearch.toLowerCase()));
@@ -640,15 +648,23 @@ export default function Schedule() {
         <Calendar size={18} style={{ color:'var(--accent)', flexShrink:0 }}/>
         <div style={{ flex:1 }}>
           <div style={{ fontSize:11, fontWeight:700, color:'var(--muted)', textTransform:'uppercase', letterSpacing:'0.05em', marginBottom:4 }}>Viewing</div>
-          <select className="form-input" style={{ maxWidth:380 }} value={selectedBatch} onChange={e => setSelectedBatch(e.target.value)}>
-            <option value={ALL}>All batches &amp; meetings</option>
-            {batches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-          </select>
+          <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+            <CourseSelect courses={courses} batches={batches} value={schedCourse}
+              onChange={v => {
+                setSchedCourse(v);
+                // Keep the batch only if it belongs to the new course.
+                if (selectedBatch !== ALL && !batchesInCourse(batches, courses, v).some(b => b.id === selectedBatch)) setSelectedBatch(ALL);
+              }} />
+            <select className="form-input" style={{ maxWidth:380 }} value={selectedBatch} onChange={e => setSelectedBatch(e.target.value)}>
+              <option value={ALL}>{schedCourse ? 'All batches in this course' : 'All batches & meetings'}</option>
+              {courseBatchList.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+            </select>
+          </div>
         </div>
         <div style={{ display:'flex', gap:12 }}>
           {[
-            { label: selectedBatch === ALL ? 'Batches' : 'Classes', value: selectedBatch === ALL ? batches.length : schedules.length, color:'var(--blue-ink)', bg:'var(--blue-soft)' },
-            { label:'Entries', value:schedules.length, color:'var(--green-ink)', bg:'var(--pos-50)' },
+            { label: selectedBatch === ALL ? 'Batches' : 'Classes', value: selectedBatch === ALL ? courseBatchList.length : courseSchedules.length, color:'var(--blue-ink)', bg:'var(--blue-soft)' },
+            { label:'Entries', value:courseSchedules.length, color:'var(--green-ink)', bg:'var(--pos-50)' },
           ].map(k => (
             <div key={k.label} style={{ padding:'8px 14px', borderRadius:10, background:k.bg, textAlign:'center', minWidth:72 }}>
               <div style={{ fontSize:20, fontWeight:700, color:k.color, fontFamily:'var(--font-display)' }}>{k.value}</div>
@@ -980,9 +996,10 @@ export default function Schedule() {
         };
         const facultyNames = [...new Set(attReport.map(r => r.session?.facultyName).filter(Boolean))];
         // Batches that have attendance (for the batch filter dropdown).
+        const attCourseIds = attCourse ? new Set(batchesInCourse(batches, courses, attCourse).map(b => b.id)) : null;
         const batchOptions = [...new Map(
           attReport.map(r => [r.session?.batchId, r.session?.batchName || batchName(r.session?.batchId)])
-            .filter(([id]) => id)
+            .filter(([id]) => id && (!attCourseIds || attCourseIds.has(id)))
         ).entries()].map(([id, name]) => ({ id, name })).sort((a, b) => (a.name||'').localeCompare(b.name||''));
 
         // Sessions passing staff + batch + cancelled filters; then the date
@@ -991,6 +1008,7 @@ export default function Schedule() {
           if (r.session?.status === 'cancelled') return false;
           if (attStaffFilter && r.session?.facultyName !== attStaffFilter) return false;
           if (attBatchFilter && r.session?.batchId !== attBatchFilter) return false;
+          if (attCourseIds && !attCourseIds.has(r.session?.batchId)) return false;
           return true;
         });
         const shown = baseFiltered.filter(r => !attDateFilter || dateOf(r) === attDateFilter);
@@ -1086,6 +1104,8 @@ export default function Schedule() {
                 <button className="btn btn-ghost btn-sm" onClick={() => setAttDateFilter(localDateStr(new Date()))}>Today</button>
                 {attDateFilter && <button className="btn btn-ghost btn-sm" onClick={() => setAttDateFilter('')}>All dates</button>}
               </div>
+              <CourseSelect courses={courses} batches={batches} value={attCourse} style={{ height:36 }}
+                onChange={v => { setAttCourse(v); setAttBatchFilter(''); }} />
               <select className="form-input" style={{ height:36, width:'auto' }} value={attBatchFilter} onChange={e => setAttBatchFilter(e.target.value)}>
                 <option value="">All batches</option>
                 {batchOptions.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
@@ -1258,9 +1278,11 @@ export default function Schedule() {
           <div>
             {/* Controls */}
             <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:14, flexWrap:'wrap' }}>
+              <CourseSelect courses={courses} batches={batches} value={covCourse} style={{ height:36 }}
+                onChange={v => { setCovCourse(v); if (!batchesInCourse(batches, courses, v).some(b => b.id === covBatch)) setCovBatch(''); }} />
               <select className="form-input" style={{ height:36, width:'auto' }} value={covBatch} onChange={e => setCovBatch(e.target.value)}>
                 <option value="">Select a batch…</option>
-                {batches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                {batchesInCourse(batches, courses, covCourse).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
               </select>
               <div style={{ display:'flex', background:'var(--surface)', border:'1px solid var(--border)', borderRadius:9, padding:3 }}>
                 {[{ key:'today', label:'Today' }, { key:'7', label:'Last 7 days' }, { key:'30', label:'Last 30 days' }].map(w => (

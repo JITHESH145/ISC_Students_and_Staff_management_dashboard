@@ -35,6 +35,14 @@ export const visibleBatches = (batches, profile) => {
   return batches.filter(b => b.mentorId === uid || (b.staffIds || []).includes(uid));
 };
 
+// Batches belonging to a course filter value: '' = all, NO_COURSE = batches
+// not linked to a known course, otherwise that course id.
+export const batchesInCourse = (batches, courses, courseId) => {
+  if (!courseId) return batches;
+  if (courseId === NO_COURSE) return batches.filter(b => !courseOfBatch(b, courses));
+  return batches.filter(b => b.courseId === courseId);
+};
+
 // [{ id, course, batches }] in course-name order. Courses with no batches are
 // skipped unless includeEmpty (CEO) and the course isn't archived. Batches not
 // linked to a known course go into a final NO_COURSE group (course: null).
