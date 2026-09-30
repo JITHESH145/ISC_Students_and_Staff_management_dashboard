@@ -283,8 +283,10 @@ export default function StudentProfile() {
       });
       setNewNote('');
       setToast({ message: 'Follow-up saved!', type: 'success' });
-      const upd = await getFollowUps(id, { role: profile?.role, uid: profile?.uid, email: user?.email });
-      setFollowups(upd);
+      // The note is saved; a failed refresh must not report it as unsaved.
+      const upd = await getFollowUps(id, { role: profile?.role, uid: profile?.uid, email: user?.email })
+        .catch(err => { if (import.meta.env.DEV) console.error('Refresh follow-ups failed:', err); return null; });
+      if (upd) setFollowups(upd);
     } catch (err) {
       if (import.meta.env.DEV) console.error('Save follow-up failed:', err);
       setToast({ message: 'Could not save follow-up. Please try again.', type: 'error' });
