@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { subscribeStudents, searchStudents, deleteStudent, addStudent, assignStudentsToBatch, syncStudentCoursesFromBatches, getBatches, getCourses, getBatchStudentCount, getStaffProfiles } from '../firebase/services';
-import { visibleBatches, groupBatchesByCourse, courseOfBatch, NO_COURSE } from '../lib/courses';
-import { CourseBanner, CourseCrumb } from '../components/courses';
+import { visibleBatches, groupBatchesByCourse, courseOfBatch, batchesInCourse, NO_COURSE } from '../lib/courses';
+import { CourseBanner, CourseCrumb, CourseSelect } from '../components/courses';
 import { Modal, Toast, Avatar, StatusBadge, Loading, Confirm, FormRow } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { Plus, Search, Eye, Trash2, Upload, ChevronRight, ChevronLeft, Users, AlertTriangle } from 'lucide-react';
@@ -23,6 +23,7 @@ export default function StudentsPage() {
   const [loading, setLoading]         = useState(true);
   const [search, setSearch]           = useState('');
   const [batchFilter, setBatchFilter] = useState('');
+  const [listCourse, setListCourse]   = useState(''); // "All students" course filter
   const [statusFilter, setStatusFilter] = useState('');
   const [showModal, setShowModal]     = useState(false);
   const [toast, setToast]             = useState(null);
@@ -57,7 +58,9 @@ export default function StudentsPage() {
   const scope = { role: profile?.role, uid: profile?.uid, email: profile?.email };
 
   // Displayed list: search results when a search is active, else the live list.
-  const students   = searchResults ?? liveStudents;
+  const listCourseIds = listView && listCourse
+    ? new Set(batchesInCourse(allBatches, courses, listCourse).map(b => b.id)) : null;
+  const students   = (searchResults ?? liveStudents).filter(s => !listCourseIds || listCourseIds.has(s.batchId));
   const totalCount = liveStudents.length;
   const searching  = !!search.trim() && searchResults === null; // debouncing
   const hasMore    = false;
@@ -270,9 +273,16 @@ export default function StudentsPage() {
           {searching && <span style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>Searching...</span>}
         </div>
         {listView && (
+          <CourseSelect courses={courses} batches={batches} value={listCourse} style={{ width: 180 }}
+            onChange={v => {
+              setListCourse(v);
+              if (batchFilter && !batchesInCourse(batches, courses, v).some(b => b.id === batchFilter)) setBatchFilter('');
+            }} />
+        )}
+        {listView && (
           <select className="form-input" style={{ width: 180 }} value={batchFilter} onChange={e => { setBatchFilter(e.target.value); setSearch(''); }}>
-            <option value="">All Batches</option>
-            {batches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+            <option value="">{listCourse ? 'All batches in course' : 'All Batches'}</option>
+            {batchesInCourse(batches, courses, listCourse).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
         )}
       </div>
