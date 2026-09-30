@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { subscribeStudents, searchStudents, deleteStudent, addStudent, assignStudentsToBatch, syncStudentCoursesFromBatches, getBatches, getStaffProfiles } from '../firebase/services';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { subscribeStudents, searchStudents, deleteStudent, addStudent, assignStudentsToBatch, syncStudentCoursesFromBatches, getBatches, getCourses, getBatchStudentCount, getStaffProfiles } from '../firebase/services';
+import { visibleBatches, groupBatchesByCourse, courseOfBatch, NO_COURSE } from '../lib/courses';
+import { CourseBanner, CourseCrumb } from '../components/courses';
 import { Modal, Toast, Avatar, StatusBadge, Loading, Confirm, FormRow } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { Plus, Search, Eye, Trash2, Upload, ChevronRight, ChevronLeft, Users, AlertTriangle } from 'lucide-react';
@@ -14,7 +16,9 @@ export default function StudentsPage() {
   const navigate       = useNavigate();
   const [liveStudents, setLiveStudents] = useState([]); // live scoped list
   const [searchResults, setSearchResults] = useState(null); // non-null while searching
-  const [batches, setBatches]         = useState([]);
+  const [allBatches, setAllBatches]   = useState([]);
+  const [courses, setCourses]         = useState([]);
+  const [batchCounts, setBatchCounts] = useState({});
   const [staffList, setStaffList]     = useState([]);
   const [loading, setLoading]         = useState(true);
   const [search, setSearch]           = useState('');
@@ -38,6 +42,16 @@ export default function StudentsPage() {
   });
 
   const isCEOorAdmin = profile?.role === 'ceo';
+  // Staff only get their own batches (and so only their courses).
+  const batches = visibleBatches(allBatches, profile);
+
+  // Drill-down lives in the URL: no params → course banners; ?course= → that
+  // course's batches; ?course=&batch= → the batch's students; ?view=list → flat list.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const courseParam = searchParams.get('course');
+  const batchParam  = searchParams.get('batch');
+  const listView    = searchParams.get('view') === 'list';
+  const effBatch    = batchParam || (listView ? batchFilter : '');
   // Access scope: staff queries carry the staffIds clause the security
   // rules require; CEO queries are unscoped.
   const scope = { role: profile?.role, uid: profile?.uid, email: profile?.email };
@@ -49,13 +63,25 @@ export default function StudentsPage() {
   const hasMore    = false;
   const loadPage   = () => {}; // no-op: the live listener keeps the list current
 
-  // Batches + staff for the filter dropdown / add form — one-time.
+  // Batches + courses + staff for the drill-down, filters and add form — one-time.
   useEffect(() => {
-    Promise.all([getBatches(), getStaffProfiles()]).then(([b, s]) => {
-      setBatches(b);
+    Promise.all([getBatches(), getCourses(), getStaffProfiles()]).then(([b, c, s]) => {
+      setAllBatches(b);
+      setCourses(c);
       setStaffList(s.filter(s => s.active !== false));
     });
   }, []);
+
+  // Per-batch student counts for the banners and batch cards.
+  const batchIdsKey = batches.map(b => b.id).join(',');
+  useEffect(() => {
+    if (!profile?.role || !batchIdsKey) return;
+    const sc = { role: profile.role, uid: profile.uid, email: profile.email };
+    let cancelled = false;
+    Promise.all(batchIdsKey.split(',').map(async id => [id, await getBatchStudentCount(id, sc).catch(() => 0)]))
+      .then(pairs => { if (!cancelled) setBatchCounts(Object.fromEntries(pairs)); });
+    return () => { cancelled = true; };
+  }, [batchIdsKey, profile?.role, profile?.uid, profile?.email]);
 
   // Live students: any add/edit/delete (by anyone) reflects with no refresh.
   // Staff see only their scoped set; CEO sees the newest 500 live.
@@ -63,11 +89,11 @@ export default function StudentsPage() {
     if (!profile?.role) return;
     setLoading(true);
     const filters = {};
-    if (batchFilter)  filters.batchId = batchFilter;
+    if (effBatch)     filters.batchId = effBatch;
     if (statusFilter) filters.status  = statusFilter;
     const sc = { role: profile.role, uid: profile.uid, email: profile.email };
     return subscribeStudents(filters, sc, (rows) => { setLiveStudents(rows); setLoading(false); });
-  }, [batchFilter, statusFilter, profile?.role, profile?.uid, profile?.email]);
+  }, [effBatch, statusFilter, profile?.role, profile?.uid, profile?.email]);
 
   // Search with debounce (transient — overlays the live list while typing).
   useEffect(() => {
@@ -105,7 +131,7 @@ export default function StudentsPage() {
     loadPage(true);
   };
 
-  const batchName = (id) => batches.find(b => b.id === id)?.name || '—';
+  const batchName = (id) => allBatches.find(b => b.id === id)?.name || '—';
   const formBatch = batches.find(b => b.id === form.batchId);
 
   // Students whose batchId doesn't resolve to a batch (added without one, or
@@ -138,7 +164,7 @@ export default function StudentsPage() {
     : [];
   // What the list should show for a student's course — the batch's course
   // wins when the student is in a valid batch, even before the sync runs.
-  const courseFor = (s) => batches.find(b => b.id === s.batchId)?.course || s.course || '—';
+  const courseFor = (s) => allBatches.find(b => b.id === s.batchId)?.course || s.course || '—';
   const handleSyncCourses = async () => {
     setSyncingCourses(true);
     try {
@@ -150,22 +176,44 @@ export default function StudentsPage() {
     } finally { setSyncingCourses(false); }
   };
 
+  // ── Drill-down levels ────────────────────────────────────────
+  const showTable   = listView || !!batchParam || !!search.trim();
+  const groups      = groupBatchesByCourse(batches, courses);
+  const viewCourse  = courseParam && courseParam !== NO_COURSE ? courses.find(c => c.id === courseParam) || null : null;
+  const courseBatches = courseParam === NO_COURSE
+    ? batches.filter(b => !courseOfBatch(b, courses))
+    : batches.filter(b => b.courseId === courseParam);
+  const viewBatch   = batchParam ? allBatches.find(b => b.id === batchParam) : null;
+  const goTo = (params) => { setSearch(''); setStatusFilter(''); setSearchParams(params); };
+  const openAdd = () => { setForm(f => ({ ...f, batchId: batchParam || f.batchId })); setShowModal(true); };
+
   return (
     <div>
       <div className="page-header">
         <h2>
-          All Students
+          {isCEOorAdmin ? 'All Students' : 'My Students'}
           <span style={{ fontSize: 14, color: 'var(--muted)', fontWeight: 400, marginLeft: 8 }}>
-            ({totalCount.toLocaleString()} total)
+            ({totalCount.toLocaleString()} {effBatch ? 'in batch' : 'total'})
           </span>
         </h2>
-        {isCEOorAdmin && (
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button className="btn btn-primary" onClick={() => setShowModal(true)}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ display: 'inline-flex', gap: 4, padding: 4, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 'var(--radius-pill)' }}>
+            {[
+              { key: 'course', label: 'By course', on: !listView, go: () => goTo({}) },
+              { key: 'list',   label: 'All students', on: listView, go: () => goTo({ view: 'list' }) },
+            ].map(t => (
+              <button key={t.key} onClick={t.go}
+                style={{ padding: '6px 14px', borderRadius: 'var(--radius-pill)', border: 'none', cursor: 'pointer', fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap', background: t.on ? 'var(--surface)' : 'transparent', color: t.on ? 'var(--brand-ink)' : 'var(--text-sub)', boxShadow: t.on ? 'var(--shadow-sm)' : 'none' }}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+          {isCEOorAdmin && (
+            <button className="btn btn-primary" onClick={openAdd}>
               <Plus size={15} /> Add Student
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* Scale info */}
@@ -176,7 +224,7 @@ export default function StudentsPage() {
       )}
 
       {/* Students without a valid batch — CEO can move them into one */}
-      {isCEOorAdmin && !batchFilter && noBatchStudents.length > 0 && (
+      {isCEOorAdmin && !effBatch && noBatchStudents.length > 0 && (
         <div style={{ padding: '10px 14px', background: '#FFFBEB', border: '1px solid #FDE68A', borderRadius: 8, fontSize: 13, color: '#92400E', marginBottom: 14, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
           <AlertTriangle size={15} style={{ flexShrink: 0 }} />
           <span style={{ flex: 1, minWidth: 200 }}>
@@ -187,7 +235,7 @@ export default function StudentsPage() {
       )}
 
       {/* Students whose stored course doesn't match their batch's course — CEO can re-sync */}
-      {isCEOorAdmin && !batchFilter && courseMismatchStudents.length > 0 && (
+      {isCEOorAdmin && !effBatch && courseMismatchStudents.length > 0 && (
         <div style={{ padding: '10px 14px', background: '#FFFBEB', border: '1px solid #FDE68A', borderRadius: 8, fontSize: 13, color: '#92400E', marginBottom: 14, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
           <AlertTriangle size={15} style={{ flexShrink: 0 }} />
           <span style={{ flex: 1, minWidth: 200 }}>
@@ -197,7 +245,23 @@ export default function StudentsPage() {
         </div>
       )}
 
-      {/* Search + batch filter row */}
+      {/* Breadcrumb for a course / batch */}
+      {!listView && courseParam && (
+        <CourseCrumb course={viewCourse} onBack={() => goTo({})}>
+          {batchParam && (
+            <>
+              <ChevronRight size={14} />
+              <span onClick={() => goTo({ course: courseParam })} style={{ cursor: 'pointer', color: 'var(--brand)', fontWeight: 600 }}>
+                {viewCourse ? viewCourse.name : 'Not linked to a course'}
+              </span>
+              <ChevronRight size={14} />
+              <span style={{ color: 'var(--text)', fontWeight: 600 }}>{viewBatch?.name || 'Batch'}</span>
+            </>
+          )}
+        </CourseCrumb>
+      )}
+
+      {/* Search (+ batch filter in the flat list) */}
       <div className="mobile-stack" style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
         <div className="search-bar" style={{ flex: 1, minWidth: 220 }}>
           <Search size={15} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
@@ -205,11 +269,68 @@ export default function StudentsPage() {
             value={search} onChange={e => setSearch(e.target.value)} />
           {searching && <span style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>Searching...</span>}
         </div>
-        <select className="form-input" style={{ width: 180 }} value={batchFilter} onChange={e => { setBatchFilter(e.target.value); setSearch(''); }}>
-          <option value="">All Batches</option>
-          {batches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-        </select>
+        {listView && (
+          <select className="form-input" style={{ width: 180 }} value={batchFilter} onChange={e => { setBatchFilter(e.target.value); setSearch(''); }}>
+            <option value="">All Batches</option>
+            {batches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        )}
       </div>
+
+      {/* Level 1: course banners */}
+      {!showTable && !courseParam && (
+        <>
+          {groups.length === 0 && (
+            <div className="card" style={{ textAlign: 'center', padding: 48, color: 'var(--muted)' }}>
+              {isCEOorAdmin ? 'No batches yet. Create a course and batches on the Batches page.' : 'No batches are assigned to you yet.'}
+            </div>
+          )}
+          <div className="grid-3">
+            {groups.map(g => (
+              <CourseBanner key={g.id} course={g.course}
+                batchCount={g.batches.length}
+                activeCount={g.batches.filter(b => b.status === 'active').length}
+                studentCount={g.batches.reduce((n, b) => n + (batchCounts[b.id] || 0), 0)}
+                onClick={() => goTo({ course: g.id })} />
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* Level 2: batches of one course */}
+      {!showTable && courseParam && (
+        <>
+          {courseBatches.length === 0 && (
+            <div className="card" style={{ textAlign: 'center', padding: 48, color: 'var(--muted)' }}>No batches in this course.</div>
+          )}
+          <div className="grid-3">
+            {courseBatches.map(b => (
+              <div key={b.id} className="card" onClick={() => goTo({ course: courseParam, batch: b.id })}
+                style={{ cursor: 'pointer', padding: '16px 18px', display: 'flex', flexDirection: 'column', gap: 10, transition: 'box-shadow 0.2s, transform 0.15s' }}
+                onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.12)'; e.currentTarget.style.transform = 'translateY(-2px)'; }}
+                onMouseLeave={e => { e.currentTarget.style.boxShadow = ''; e.currentTarget.style.transform = 'none'; }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, fontFamily: 'var(--font-display)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.name}</div>
+                  <span style={{
+                    fontSize: 11, padding: '3px 10px', borderRadius: 20, fontWeight: 600, flexShrink: 0,
+                    background: b.status === 'active' ? '#D1FAE5' : b.status === 'upcoming' ? '#DBEAFE' : '#F3F4F6',
+                    color: b.status === 'active' ? '#065F46' : b.status === 'upcoming' ? '#1E40AF' : '#6B7280',
+                  }}>{b.status || 'active'}</span>
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--text)' }}>{batchCounts[b.id] || 0}</span> students
+                  {b.mentorName ? ` · Mentor: ${b.mentorName}` : ''}
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: 6, borderTop: '1px solid var(--border)', fontSize: 12, fontWeight: 600, color: 'var(--brand)' }}>
+                  View students <ChevronRight size={14} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {showTable && (<>
 
       {/* Status filter chips */}
       <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginBottom:14 }}>
@@ -300,6 +421,7 @@ export default function StudentsPage() {
           </div>
         )}
       </div>
+      </>)}
 
       {/* Add Student Modal */}
       {showModal && (

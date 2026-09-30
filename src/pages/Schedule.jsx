@@ -6,8 +6,9 @@ import {
   deleteBatchSchedule, updateScheduleStatus, updateBatchSchedule, saveAttendance,
   getSessionAttendance, deleteSessionAttendance, getBatchStudents, getStaffProfiles,
   saveClassReport, updateClassReport, getSessionReports, deleteSessionReports, getStudentReports,
-  getAllAssessments, notifyStaff,
+  getAllAssessments, notifyStaff, subscribeCourses,
 } from '../firebase/services';
+import { hasFeature, courseOfBatch } from '../lib/courses';
 import { Modal, Toast, Loading, Confirm } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -137,6 +138,12 @@ export default function Schedule() {
   const isCEO = profile?.role === 'ceo';
 
   const [batches,       setBatches]       = useState([]);
+  const [courses,       setCourses]       = useState([]);
+  // Course feature switches (attendance / class reports). A slot without a
+  // batch, or a batch without a course, keeps every feature.
+  useEffect(() => subscribeCourses(setCourses), []);
+  const slotHas = (slot, key) => !slot?.batchId
+    || hasFeature(courseOfBatch(batches.find(b => b.id === slot.batchId), courses), key);
   const [selectedBatch, setSelectedBatch] = useState(ALL); // default: show everything
   const [rawSchedules,  setRawSchedules]  = useState([]);
   const [assessments,   setAssessments]   = useState([]);
@@ -903,12 +910,16 @@ export default function Schedule() {
               </div>
             ) : (
               <div style={{ display:'flex', gap:8, flexWrap:'wrap', borderTop:'1px solid var(--border)', paddingTop:14 }}>
-                <button className="btn btn-primary btn-sm" onClick={() => openAttendance(slotDetail)}>
-                  <Users size={13}/> {savedAtt[slotDetail.id] ? 'Edit Attendance' : 'Mark Attendance'}
-                </button>
-                <button className="btn btn-sm" style={{ border:'1px solid var(--accent)', background:'var(--accent-50)', color:'var(--accent-ink)' }} onClick={() => openReports(slotDetail)}>
-                  <MessageSquare size={13}/> Progress Reports
-                </button>
+                {slotHas(slotDetail, 'attendance') && (
+                  <button className="btn btn-primary btn-sm" onClick={() => openAttendance(slotDetail)}>
+                    <Users size={13}/> {savedAtt[slotDetail.id] ? 'Edit Attendance' : 'Mark Attendance'}
+                  </button>
+                )}
+                {slotHas(slotDetail, 'classReports') && (
+                  <button className="btn btn-sm" style={{ border:'1px solid var(--accent)', background:'var(--accent-50)', color:'var(--accent-ink)' }} onClick={() => openReports(slotDetail)}>
+                    <MessageSquare size={13}/> Progress Reports
+                  </button>
+                )}
                 <select className="form-input" style={{ height:32, fontSize:12, flex:'0 0 auto', width:'auto' }} value={slotDetail.status || ''}
                   onChange={async e => {
                     const ns = e.target.value; if (!ns) return;

@@ -8,8 +8,9 @@ import {
   getStudentReports, getStudentAttendanceSummary, getBatchTasks,
   getStudentBatchAssessments,
   saveClassReport, updateClassReport, deleteClassReport,
-  saveAssessmentResults
+  saveAssessmentResults, getCourses,
 } from '../firebase/services';
+import { hasFeature, courseOfBatch } from '../lib/courses';
 import { Modal, Toast, Avatar, StatusBadge, Loading, FormRow, Confirm } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import {
@@ -109,7 +110,9 @@ export default function StudentProfile() {
   const [confirmBox,  setConfirmBox]  = useState(null); // { message, onConfirm, confirmLabel }
   const [staffList,   setStaffList]   = useState([]);
   const [loading,     setLoading]     = useState(true);
-  const [activeTab,   setActiveTab]   = useState('overview');
+  // Requested tab; falls back to Overview when the course has the flow off.
+  const [rawTab,      setActiveTab]   = useState('overview');
+  const [courses,     setCourses]     = useState([]);
   const [toast,       setToast]       = useState(null);
 
   // Edit modal
@@ -170,6 +173,7 @@ export default function StudentProfile() {
       const a  = await getAssessments(id).catch(() => []);       // student-level results added on this page
       const ba = s?.batchId ? await getStudentBatchAssessments(id, s.batchId).catch(() => []) : []; // batch/main-page assessments
       const st = await getStaffProfiles().catch(() => []);
+      getCourses().then(setCourses);
       setStudent(s);
       setBatches(b);
       setFollowups(f);
@@ -509,6 +513,10 @@ export default function StudentProfile() {
   const trend      = (latestPct !== null && firstPct !== null && assessments.length > 1) ? latestPct - firstPct : null;
   const flowDone   = flowDoneCount();
   const flowTotal  = batchCourseFlow.length;
+  // The student's course is read through their batch; a course can switch
+  // the onboarding flow off for all its batches.
+  const flowOn     = hasFeature(courseOfBatch(batches.find(b => b.id === student?.batchId), courses), 'onboardingFlow');
+  const activeTab  = !flowOn && rawTab === 'courseflow' ? 'overview' : rawTab;
 
   return (
     <div>
@@ -547,11 +555,11 @@ export default function StudentProfile() {
       <div className="tab-bar" style={{ marginBottom:20 }}>
         {[
           { key:'overview',   label:'Overview'                              },
-          { key:'courseflow', label:`Course Flow (${flowDone}/${flowTotal})`},
+          flowOn && { key:'courseflow', label:`Course Flow (${flowDone}/${flowTotal})`},
           { key:'assessments',label:`Assessments (${assessments.length})`   },
           { key:'performance',label:`Performance (${classReports.length})`  },
           { key:'followups',  label:`Follow-Ups (${followups.length})`      },
-        ].map(t => (
+        ].filter(Boolean).map(t => (
           <div key={t.key} className={`tab ${activeTab===t.key?'active':''}`} onClick={() => setActiveTab(t.key)}>
             {t.label}
           </div>
@@ -709,6 +717,7 @@ export default function StudentProfile() {
           {/* Right — quick stats + latest activity */}
           <div>
             {/* Course flow progress card */}
+            {flowOn && (
             <div className="card" style={{ marginBottom:14 }}>
               <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:10 }}>
                 <h3 style={{ fontSize:14, fontWeight:600 }}>Course Flow Progress</h3>
@@ -725,6 +734,7 @@ export default function StudentProfile() {
                   View all steps                 </span>
               </div>
             </div>
+            )}
 
             {/* Assessment summary */}
             {assessments.length > 0 && (

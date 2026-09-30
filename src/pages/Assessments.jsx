@@ -3,8 +3,9 @@ import {
   subscribeAssessments, addAssessment, deleteAssessment,
   getBatches, getStaffProfiles, getBatchStudents,
   saveAssessmentResults, getAssessmentResults,
-  addNotification, createRequest, updateTopLevelAssessment,
+  addNotification, createRequest, updateTopLevelAssessment, getCourses,
 } from '../firebase/services';
+import { hasFeature, courseOfBatch } from '../lib/courses';
 import { Modal, Toast, Loading } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { Plus, Upload, Search, ClipboardList, Trash2, Eye } from 'lucide-react';
@@ -58,6 +59,7 @@ export default function Assessments({ filterBatchId = null }) {
 
   const [assessments,   setAssessments]   = useState([]);
   const [batches,       setBatches]       = useState([]);
+  const [courses,       setCourses]       = useState([]);
   const [staffList,     setStaffList]     = useState([]);
   const [loading,       setLoading]       = useState(true);
   const [toast,         setToast]         = useState(null);
@@ -117,9 +119,10 @@ export default function Assessments({ filterBatchId = null }) {
 
   // Batches + staff (pickers) — one-time on mount.
   useEffect(() => {
-    Promise.all([getBatches(), getStaffProfiles()]).then(([b, s]) => {
+    Promise.all([getBatches(), getStaffProfiles(), getCourses()]).then(([b, s, c]) => {
       setBatches(b);
       setStaffList(s.filter(x => x.active !== false));
+      setCourses(c);
     });
   }, []);
 
@@ -627,7 +630,9 @@ export default function Assessments({ filterBatchId = null }) {
                 <select className="form-input" required value={createForm.batchId}
                   onChange={e => setCreateForm({ ...createForm, batchId: e.target.value })}>
                   <option value="">Select Batch</option>
-                  {batches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+                  {/* Only batches whose course has assessments switched on */}
+                  {batches.filter(b => hasFeature(courseOfBatch(b, courses), 'assessments'))
+                    .map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
                 </select>
               </div>
               <div className="form-group">

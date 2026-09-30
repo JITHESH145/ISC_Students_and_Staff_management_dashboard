@@ -35,6 +35,8 @@ async function seed() {
     // tasks
     await setDoc(doc(db, 'tasks/t1'), { title: 'mine',  assignedToEmail: 's1@isc.test', status: 'pending' });
     await setDoc(doc(db, 'tasks/t2'), { title: 'other', assignedToEmail: 's2@isc.test', status: 'pending' });
+    // courses
+    await setDoc(doc(db, 'courses/c1'), { name: 'ISC Level 1', status: 'active', features: { assessments: true } });
   });
 }
 
@@ -94,6 +96,16 @@ await test('staff CANNOT read another staff\'s task', () =>
   assertFails(getDoc(doc(asStaff1(), 'tasks/t2'))));
 await test('staff CANNOT create tasks (CEO-only)', () =>
   assertFails(setDoc(doc(asStaff1(), 'tasks/t3'), { title: 'x', assignedToEmail: 's1@isc.test' })));
+
+// courses — readable by active staff, writable by CEO only
+await test('staff CAN read courses', () =>
+  assertSucceeds(getDoc(doc(asStaff1(), 'courses/c1'))));
+await test('staff CANNOT update a course', () =>
+  assertFails(updateDoc(doc(asStaff1(), 'courses/c1'), { name: 'Hacked' })));
+await test('CEO CAN create a course', () =>
+  assertSucceeds(setDoc(doc(asCEO(), 'courses/c2'), { name: 'Music', status: 'active', features: {} })));
+await test('unauthenticated user CANNOT read courses', () =>
+  assertFails(getDoc(doc(asAnon(), 'courses/c1'))));
 
 // default deny
 await test('unknown collection is denied even for CEO', () =>

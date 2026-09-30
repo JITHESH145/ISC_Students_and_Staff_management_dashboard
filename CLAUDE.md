@@ -36,7 +36,10 @@ isc-sms/
       layout/Sidebar.jsx, layout/Topbar.jsx
       ui/index.jsx        Shared UI (Modal, Toast, Avatar, Loading, etc.)
       ui/NotifBell.jsx
+      courses/index.jsx   CourseBanner, CourseCrumb, CourseFormModal (feature switches)
       ErrorBoundary.jsx   Wraps main content
+    lib/
+      courses.js          Course helpers: COURSE_FEATURES, hasFeature, groupBatchesByCourse, visibleBatches
     pages/                One file per route (see Routes below)
   firestore.rules         Hardened Firestore security rules
   storage.rules           Hardened Storage rules (10MB cap, content-type allowlist)
@@ -61,7 +64,8 @@ isc-sms/
 ## 5. Core Features (how each works end-to-end)
 - **Auth & roles:** Firebase email/password login (`AuthContext`). On auth change, loads `staff/{uid}` into `profile` (drives UI/nav). **Authorization is enforced separately** by `roles/{uid}` in the rules. **Domain restriction:** only `@internationalskillsclub.com` emails may sign in — enforced in the login form, in `AuthContext` (`isAllowedEmail`; non-domain sessions are signed out on auth change), and in `createStaffAccount`.
 - **Role-based nav:** `NAV_BY_ROLE` in `App.jsx` → `ceo` sees everything; `staff` sees a scoped subset. Home route renders `Dashboard` (ceo) or `StaffDashboard` (staff).
-- **Batches** (the hub): CEO creates batches; tabs for Students, Onboarding Analytics, Assignments, Assessments, Staff. Only **Active** batches are editable (status gates add/edit of students/tasks/assessments).
+- **Courses** (above batches): the CEO creates courses (`CourseFormModal`) and switches features on/off per course — `onboardingFlow`, `assignments`, `assessments`, `attendance`, `classReports` (`COURSE_FEATURES` in `src/lib/courses.js`). A feature is ON unless `course.features[key] === false` (`hasFeature`); a batch with no course (or a deleted one) has everything ON. Switched-off features hide their tabs/buttons for all the course's batches (Batches detail tabs + Course Flow button/column, profile Course Flow tab/card, Schedule attendance/report buttons, Assessments batch dropdown). A course also holds the `courseFlow`/`studentFields` template copied into new batches. Batches and Students pages drill down course banners → batches (URL `?course=<id>`, Students also `&batch=<id>` / `?view=list`). "Link to courses" (`linkBatchesToCourses`) is the one-time migration for batches that only have a free-text `course` name. Renaming a course (`updateCourse`) or moving a batch (`setBatchCourse`) re-stamps the `course` name on batches/students.
+- **Batches** (the hub, inside a course): CEO creates batches in a course; tabs for Students, Onboarding Analytics, Assignments, Assessments, Staff (the middle three depend on course features). Only **Active** batches are editable (status gates add/edit of students/tasks/assessments).
 - **Students:** paginated/searchable; created into a batch with denormalized `staffIds[]` (= batch staff + mentor) so scoping works. Batch moves recompute `staffIds` (CEO-only).
 - **Schedule:** shared global calendar (Day/Week/Month) across all batches; classes, meetings, and assessments appear. Staff mark attendance + write per-student class progress reports.
 - **Assessments:** create for all/specific students, enter marks (CSV or manual) → `assessments` + `assessmentResults`; joined per-student for the profile Performance view.
@@ -70,6 +74,7 @@ isc-sms/
 - **Staff Management:** `createStaffAccount` (adminAuth.js) makes the Auth user via an isolated secondary app so the CEO isn't logged out, writes `staff/`, `roles/`, and `staffDirectory/` docs, and emails a password-reset link. **Delete → re-add (Auth vs Firestore split):** a person = a Firebase **Auth** account (login) + **Firestore** docs (`staff`/`roles`/`staffDirectory`). The client can't delete/look-up another user's Auth account by email, so removing a staff member used to orphan the Auth account → `email-already-in-use` on re-add. Fixed by `api/staff-admin.js` (Admin SDK, service account, CEO-only): permanent delete calls `action:'delete'` to remove the Auth account too (no orphan ever); re-add on `email-already-in-use` calls `action:'resolve'` to recover the uid and rebuild the docs (heals any orphan, incl. ones deleted directly in the Firebase console). Requires `FIREBASE_SERVICE_ACCOUNT` env var in Vercel; when unset the function is `disabled` and the app falls back to the client `deletedStaff/{uid}` tombstone + sign-in-once self-registration. **Resend setup email:** `resendStaffSetupEmail` (Staff Management success modal + per-row button) re-sends the password-setup link with a 30s cooldown.
 - **Notifications:** in-app via Firestore `notifications` (real-time `onSnapshot` in `NotifContext`) + optional FCM web push (needs VAPID key).
 - **Trash & Requests:** soft-delete/restore of students & batches (CEO-only); staff removal/other requests reviewed by CEO.
+- **Fees:** CEO-only page (`/fees`, `fees` collection, rules CEO-only). Fees are tracked **per batch and per student** (`saveFee(studentId, …)`, `getFeesByBatch`) — deliberately **not** course-based; don't move them onto courses.
 
 ## 6. Environment Variables
 Firebase client config is **hardcoded** in `src/firebase/config.js` (public Firebase keys — safe to expose). The only env var:
@@ -82,7 +87,8 @@ Backfill script only: `GOOGLE_APPLICATION_CREDENTIALS` — path to a Firebase se
 - **`staff/{uid}`** full profile `{ name, email, role, subjects[], active, fcmToken }` — readable by owner + CEO. `role` here is display-only.
 - **`staffDirectory/{uid}`** safe public subset `{ name, role, subjects, active, email }` (no `fcmToken`) — used by pickers/dropdowns.
 - **`students/{id}`** `{ name, phone, email, batchId, staffAssigned, status, staffIds[], courseFlow, ... }` — `staffIds[]` = denormalized batch staff+mentor for scoping.
-- **`batches/{id}`** `{ course, startDate/endDate, status, staffIds[], mentorId, courseFlow, studentFields }`.
+- **`courses/{id}`** `{ name, description, color, features: { onboardingFlow, assignments, assessments, attendance, classReports }, courseFlow[], studentFields[], durationMonths, status: 'active'|'archived', createdAt, updatedAt }` — read: active staff; write: CEO.
+- **`batches/{id}`** `{ courseId, course, startDate/endDate, status, staffIds[], mentorId, courseFlow, studentFields }` — `courseId → courses`; `course` is the denormalized course name. Students have **no** `courseId`: a student's course is read through their batch (they keep the `course` name string).
 - **`schedules/{id}`** calendar entries `{ batchId, day/scheduledDate, time, type, participantStudents, status }`.
 - **`attendance/{id}`** per session `{ scheduleId, batchId, records: {studentId→{name,present}} }` (upserted, one doc/session).
 - **`classReports/{id}`** per-student class notes `{ studentId, scheduleId, batchId, facultyUid, note, rating }`.
@@ -92,7 +98,7 @@ Backfill script only: `GOOGLE_APPLICATION_CREDENTIALS` — path to a Firebase se
 - **`tasks/{id}`** staff to-dos `{ assignedToEmail, status, completionNote }`.
 - **`followups/{id}`**, **`concerns/{id}`**, **`reports/{id}`** (daily), **`leads/{id}`** (CEO-only), **`notifications/{id}`** (`toEmail`-scoped), **`requests/{id}`**, **`trash/{id}`** (CEO-only, `type: student|batch`), **`deletedStaff/{uid}`** (CEO-only tombstones `{ uid, email, name, role, deletedAt }` for orphaned Auth accounts).
 
-**Relationships:** `student.batchId → batch`; `student.staffIds[]`/`batch.staffIds[]`/`batch.mentorId → roles`/`staff uid`; `assessmentResults.assessmentId → assessment`; `attendance`/`classReports.scheduleId → schedule`; `batchTasks`/`assessments`/`schedules.batchId → batch`.
+**Relationships:** `batch.courseId → course`; `student.batchId → batch`; `student.staffIds[]`/`batch.staffIds[]`/`batch.mentorId → roles`/`staff uid`; `assessmentResults.assessmentId → assessment`; `attendance`/`classReports.scheduleId → schedule`; `batchTasks`/`assessments`/`schedules.batchId → batch`.
 
 ## 8. Common Commands
 Run from the `isc-sms/` directory. **Note:** this machine's `C:` drive is full — npm cache is redirected to `D:` (`npm config get cache` → `D:\npm-cache`); keep it there.
@@ -114,6 +120,8 @@ npm run test:rules   # Firestore rules tests (needs Firebase emulator + Java)
 - **Email is disabled client-side** — `emailService.js` functions are no-op stubs (`{status:'disabled-client-side'}`). Real email goes server-side via `notifyStaff` → `/api/send-email` (Vercel function, `api/send-email.js`); it builds a branded HTML email from structured `details` (`[{label, value}]` — assigned by, due date, meet link, …) passed by the call sites. Mail creds live only in Vercel env vars. Never re-embed provider keys in the client.
 - **Staff creation uses a secondary Firebase app** (`adminAuth.js`) so creating a user doesn't sign the CEO out. Don't call `createUserWithEmailAndPassword` on the primary `auth`.
 - **Rules bootstrap:** the hardened rules read `roles/{uid}`; before deploying them the CEO's `roles` doc must exist or everyone (incl. CEO) is locked out. See `SECURITY_SETUP.md`. The **live** project may still run broad "any authenticated user" rules — deploy the repo rules deliberately.
+- **Staff batch scoping outside students is UI-only:** `batches`, `courses`, `schedules` etc. are readable by any active staff under the rules; staff seeing only their own batches/courses (`visibleBatches`, mentorId or `staffIds`) is a UI filter, not a security boundary. Only `students` (via `staffIds`) and the assignee/author-scoped collections are enforced by rules.
+- **Courses rules must be deployed:** until the `courses` rule is live, course reads fail — `getCourses`/`subscribeCourses` fail soft to `[]`, so every feature stays ON and all batches show as "Not linked to a course".
 - **Documents page** needs Firebase Storage enabled with the shipped `storage.rules`; if it won't load, check Storage setup.
 - **Passwords** are generated with a CSPRNG (`crypto.getRandomValues`) — never introduce `Math.random()` for anything security-related.
 

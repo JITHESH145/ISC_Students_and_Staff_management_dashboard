@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import {
   getBatches, subscribeBatches, addBatch, updateBatch,
   getBatchStudents, addStudent, bulkAddStudents, getBatchStudentCount, updateStudent, syncBatchStaffToStudents,
@@ -8,6 +8,7 @@ import {
   updateScheduleStatus, saveAttendance, getSessionAttendance,
   addNotification, notifyStaff, getTrashItems, permanentDelete,
   createRequest,
+  subscribeCourses, addCourse, updateCourse, setBatchCourse, linkBatchesToCourses,
   getAssessments, addAssessment, deleteAssessment, getAssessmentResults, saveAssessmentResults,
 } from '../firebase/services';
 import {
@@ -17,6 +18,8 @@ import { db } from '../firebase/config';
 import { Modal, Toast, Loading, FormRow, Avatar, StatusBadge } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { sendAssignmentEmail } from '../firebase/emailService';
+import { ALL_FEATURES_ON, hasFeature, courseOfBatch, groupBatchesByCourse, NO_COURSE } from '../lib/courses';
+import { CourseBanner, CourseCrumb, CourseFormModal } from '../components/courses';
 import {
   Plus, Upload, UserPlus, ChevronRight, ArrowLeft,
   Download, CheckSquare, Users, Trash2, Settings,
@@ -24,14 +27,6 @@ import {
   ChevronUp, ChevronDown
 } from 'lucide-react';
 
-// Course dropdown: only "ISC Level 1" is a fixed option. Any other course is
-// typed once via "Other" and then persists automatically, because it's saved on
-// the batch and re-derived from existing batches next time (see courseOptions).
-const BASE_COURSES = ['ISC Level 1'];
-// Legacy hardcoded courses that were removed from the picker — filtered out so
-// they don't reappear even if an old batch still uses one.
-const LEGACY_COURSES = ['Python','Data Science','Web Development','Machine Learning','Digital Marketing','UI/UX Design','Cyber Security','ISC Level 2','AI Batch','Other'];
-const OTHER_COURSE = '__other__';
 const DAYS    = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
 const PHASES  = ['onboarding', 'course'];
 
@@ -94,6 +89,30 @@ const DEFAULT_STUDENT_FIELDS = [
   { key: 'varkResult',    label: 'VARK Learning Style',       required: false, type: 'text'  },
   { key: 'syllabus',      label: 'Syllabus (CBSE/STATE/ICSE)',required: false, type: 'text'  },
 ];
+
+// "Basic form" student fields for courses that don't need the ISC form.
+const BASIC_STUDENT_FIELDS = [
+  { key: 'name',           label: 'Name',            required: true,  type: 'text'  },
+  { key: 'phone',          label: 'Phone Number',    required: false, type: 'text'  },
+  { key: 'whatsappNumber', label: 'Whatsapp Number', required: false, type: 'text'  },
+  { key: 'email',          label: 'Email',           required: false, type: 'email' },
+  { key: 'address',        label: 'Address',         required: false, type: 'text'  },
+];
+
+// Templates offered when creating a course (copied into its new batches).
+const COURSE_TEMPLATES = {
+  standardFlow:   DEFAULT_COURSE_FLOW,
+  standardFields: DEFAULT_STUDENT_FIELDS,
+  basicFields:    BASIC_STUDENT_FIELDS,
+};
+
+const EMPTY_BATCH_FORM = {
+  name:'', courseId:'', course:'', mentorId:'', mentorName:'', faculties:[], startDate:'', endDate:'',
+  status:'upcoming', maxSeats:'', courseDurationMonths:'',
+  courseFlow: DEFAULT_COURSE_FLOW,
+  studentFields: DEFAULT_STUDENT_FIELDS,
+  subjects: [], staffIds: [], staffDetails: [],
+};
 
 function generateKey(label) {
   return label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') + '_' + Math.random().toString(36).slice(2,5);
@@ -402,7 +421,9 @@ export default function Batches() {
   const [batchStudents, setBatchStudents] = useState([]);
   const [schedules, setSchedules]       = useState([]);
   const [batchTasks, setBatchTasks]     = useState([]);
-  const [activeTab, setActiveTab]       = useState('students');
+  // Requested tab; the detail view falls back to Students when the batch's
+  // course has that feature switched off (see `activeTab` there).
+  const [rawTab, setActiveTab]          = useState('students');
   const [toast, setToast]               = useState(null);
   const [saving, setSaving]             = useState(false);
   const [csvPreview, setCsvPreview]     = useState(null);
@@ -474,13 +495,17 @@ export default function Batches() {
   const marksFileRef = useRef();
 
   // Batch create form
-  const [createForm, setCreateForm] = useState({
-    name:'', course:'', courseIsOther:false, mentorId:'', mentorName:'', faculties:[], startDate:'', endDate:'',
-    status:'upcoming', maxSeats:'', courseDurationMonths:'',
-    courseFlow: DEFAULT_COURSE_FLOW,
-    studentFields: DEFAULT_STUDENT_FIELDS,
-    subjects: [], staffIds: [], staffDetails: [],
-  });
+  const [createForm, setCreateForm] = useState(EMPTY_BATCH_FORM);
+
+  // Courses: level 1 shows course banners, ?course=<id> shows that course's batches.
+  const [courses, setCourses]           = useState([]);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const courseParam = searchParams.get('course');
+  const [courseForm, setCourseForm]     = useState(null); // null | {} (new) | course (edit)
+  const [savingCourse, setSavingCourse] = useState(false);
+  const [linking, setLinking]           = useState(false);
+  const [changeCourse, setChangeCourse] = useState(null); // selected courseId in the Change course modal
+  const [courseSearch, setCourseSearch] = useState('');
 
   const [studentForm, setStudentForm] = useState({});
 
@@ -566,6 +591,9 @@ export default function Batches() {
     getStaffProfiles().then(s => setStaffList(s.filter(x => x.active !== false)));
   }, []);
 
+  // Live courses (banners, feature switches, create-batch dropdown).
+  useEffect(() => subscribeCourses(setCourses), []);
+
   // Deep-link: open a specific batch passed via router navigation state (once).
   useEffect(() => {
     if (!location.state?.batchId) return;
@@ -601,8 +629,7 @@ export default function Batches() {
   // ── CRUD handlers ─────────────────────────────────────────────
   const handleCreateBatch = async (e) => {
     e.preventDefault();
-    // Course may be typed via "Other"; require a non-empty value either way.
-    if (!createForm.course.trim()) { setToast({ message:'Please choose or type a course.', type:'error' }); return; }
+    if (!createForm.courseId) { setToast({ message:'Please choose a course.', type:'error' }); return; }
     setSaving(true);
     // The faculty chips only stored names in createForm.faculties, so the batch
     // was saved with empty staffIds/staffDetails — meaning no staff were actually
@@ -613,10 +640,7 @@ export default function Batches() {
     // staffIds drives access + "my batches"; include the mentor so they are
     // covered even without the separate mentorId query.
     const staffIds = [...new Set([...facultyStaff.map(s => s.id), createForm.mentorId].filter(Boolean))];
-    // courseIsOther is a UI-only flag — don't persist it on the batch doc.
-    const batchData = { ...createForm, course: createForm.course.trim() };
-    delete batchData.courseIsOther;
-    await addBatch({ ...batchData, staffIds, staffDetails });
+    await addBatch({ ...createForm, staffIds, staffDetails });
     // Notify every faculty + mentor assigned at creation (in-app + email).
     // This path previously assigned staff silently — no notification fired.
     const mentorStaff = createForm.mentorId ? staffList.find(s => s.id === createForm.mentorId) : null;
@@ -642,8 +666,86 @@ export default function Batches() {
     }
     setToast({ message:`Batch "${createForm.name}" created!`, type:'success' });
     setShowCreate(false);
-    setCreateForm({ name:'', course:'', courseIsOther:false, mentorId:'', mentorName:'', faculties:[], startDate:'', endDate:'', status:'upcoming', maxSeats:'', courseDurationMonths:'', courseFlow:DEFAULT_COURSE_FLOW, studentFields:DEFAULT_STUDENT_FIELDS, subjects:[], staffIds:[], staffDetails:[] });
+    setCreateForm(EMPTY_BATCH_FORM);
     await loadBatches(); setSaving(false);
+  };
+
+  // ── Courses ───────────────────────────────────────────────────
+  const openCourse = (id) => { setSelectedBatch(null); setSearchParams(id ? { course: id } : {}); };
+
+  // Choosing a course copies its duration, flow and fields into the batch form.
+  const applyCourseToForm = (form, course) => {
+    if (!course) return { ...form, courseId: '', course: '' };
+    const months = course.durationMonths || form.courseDurationMonths;
+    return {
+      ...form, courseId: course.id, course: course.name,
+      courseDurationMonths: months,
+      endDate: addMonthsToDate(form.startDate, months),
+      courseFlow: course.courseFlow || DEFAULT_COURSE_FLOW,
+      studentFields: course.studentFields || DEFAULT_STUDENT_FIELDS,
+    };
+  };
+
+  const openCreateBatch = (course = null) => {
+    setCreateForm(applyCourseToForm(EMPTY_BATCH_FORM, course?.status === 'archived' ? null : course));
+    setShowCreate(true);
+  };
+
+  const handleSaveCourse = async (data) => {
+    setSavingCourse(true);
+    try {
+      if (courseForm?.id) {
+        // Only pass the name when it changed — a rename re-stamps every batch/student.
+        const { name, ...rest } = data;
+        await updateCourse(courseForm.id, name !== courseForm.name ? data : rest, batches);
+        setToast({ message: `Course "${data.name}" updated.`, type: 'success' });
+      } else {
+        const ref = await addCourse(data);
+        setToast({ message: `Course "${data.name}" created.`, type: 'success' });
+        openCourse(ref.id);
+      }
+      setCourseForm(null);
+    } catch (err) {
+      setToast({ message: 'Could not save the course: ' + err.message, type: 'error' });
+    } finally { setSavingCourse(false); }
+  };
+
+  const handleArchiveCourse = async (course) => {
+    const status = course.status === 'archived' ? 'active' : 'archived';
+    try {
+      await updateCourse(course.id, { status });
+      setToast({ message: `Course ${status === 'archived' ? 'archived' : 'restored'}.`, type: 'success' });
+    } catch (err) {
+      setToast({ message: 'Error: ' + err.message, type: 'error' });
+    }
+  };
+
+  const handleLinkCourses = async () => {
+    setLinking(true);
+    try {
+      const { created, linked } = await linkBatchesToCourses(batches, courses, {
+        features: ALL_FEATURES_ON, courseFlow: DEFAULT_COURSE_FLOW, studentFields: DEFAULT_STUDENT_FIELDS,
+      });
+      setToast({ message: `Linked ${linked} batch${linked === 1 ? '' : 'es'}; created ${created} course${created === 1 ? '' : 's'}.`, type: 'success' });
+    } catch (err) {
+      setToast({ message: 'Could not link batches: ' + err.message, type: 'error' });
+    } finally { setLinking(false); }
+  };
+
+  const handleChangeCourse = async () => {
+    const course = courses.find(c => c.id === changeCourse);
+    if (!course || !selectedBatch) return;
+    setSaving(true);
+    try {
+      await setBatchCourse(selectedBatch, course);
+      const updated = { ...selectedBatch, courseId: course.id, course: course.name };
+      setSelectedBatch(updated);
+      setBatches(prev => prev.map(b => b.id === updated.id ? updated : b));
+      setChangeCourse(null);
+      setToast({ message: `Moved to course "${course.name}".`, type: 'success' });
+    } catch (err) {
+      setToast({ message: 'Error: ' + err.message, type: 'error' });
+    } finally { setSaving(false); }
   };
 
   const toggleFaculty = (name) => {
@@ -1237,7 +1339,18 @@ export default function Batches() {
     const pct   = progress(selectedBatch);
     const schedByDay = {};
     DAYS.forEach(d => { schedByDay[d] = schedules.filter(s => s.day === d); });
-    const batchFlow = selectedBatch.courseFlow || DEFAULT_COURSE_FLOW;
+    // Course feature switches: tabs/buttons for switched-off features are hidden.
+    const batchCourse = courseOfBatch(selectedBatch, courses);
+    const flowOn = hasFeature(batchCourse, 'onboardingFlow');
+    const tabs = [
+      { key:'students',    label:`Students (${count})` },
+      flowOn && { key:'onboarding', label:'Onboarding Analytics' },
+      hasFeature(batchCourse, 'assignments') && { key:'tasks', label:`Assignments (${batchTasks.length})` },
+      hasFeature(batchCourse, 'assessments') && { key:'assessments', label:`Assessments (${batchAssessments.length})` },
+      { key:'staff',       label:`Staff (${(selectedBatch.staffDetails || []).filter(s => s.uid !== selectedBatch.mentorId).length + (selectedBatch.mentorId ? 1 : 0)})` },
+    ].filter(Boolean);
+    const activeTab = tabs.some(t => t.key === rawTab) ? rawTab : 'students';
+    const batchFlow = flowOn ? (selectedBatch.courseFlow || DEFAULT_COURSE_FLOW) : [];
     const batchFields = selectedBatch.studentFields || DEFAULT_STUDENT_FIELDS;
     const batchSubjects = selectedBatch.subjects || [];
     const batchStaffDetails = selectedBatch.staffDetails || [];
@@ -1320,7 +1433,12 @@ export default function Batches() {
                 )}
               </div>
               <div style={{ fontSize:13, color:'#6B7280' }}>
-                {selectedBatch.course}
+                {isCEOorAdmin ? (
+                  <button onClick={() => setChangeCourse(selectedBatch.courseId || '')} title="Change course"
+                    style={{ background:'none', border:'none', padding:0, cursor:'pointer', color:'var(--brand)', fontWeight:600, fontSize:13, display:'inline-flex', alignItems:'center', gap:4 }}>
+                    {selectedBatch.course || 'No course'} <Pencil size={11}/>
+                  </button>
+                ) : selectedBatch.course}
                 {selectedBatch.courseDurationMonths ? ` · ${selectedBatch.courseDurationMonths} months` : ''}
                 {selectedBatch.startDate ? ` · ${new Date(selectedBatch.startDate).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})} ` : ''}
                 {selectedBatch.endDate   ? ` ${new Date(selectedBatch.endDate).toLocaleDateString('en-IN',{day:'numeric',month:'short',year:'numeric'})}` : ''}
@@ -1332,7 +1450,7 @@ export default function Batches() {
           <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
             {isCEOorAdmin && (
               <>
-                <button className="btn btn-ghost btn-sm" onClick={() => { setEditFlow([...batchFlow]); setShowFlowConfig(true); }}><Settings size={13}/> Course Flow</button>
+                {flowOn && <button className="btn btn-ghost btn-sm" onClick={() => { setEditFlow([...batchFlow]); setShowFlowConfig(true); }}><Settings size={13}/> Course Flow</button>}
                 <button className="btn btn-ghost btn-sm" onClick={() => { setEditFields([...batchFields]); setShowFieldConfig(true); }}><Settings size={13}/> Student Fields</button>
               </>
             )}
@@ -1390,9 +1508,9 @@ export default function Batches() {
             { label:'Total Students',  value:count,                                                              color:'var(--blue-ink)',    bg:'var(--blue-soft)' },
             { label:'Active',          value:batchStudents.filter(s=>s.status==='active').length,                color:'var(--green-ink)',   bg:'var(--green-soft)' },
             { label:'At Risk',         value:batchStudents.filter(s=>s.status==='at-risk').length,               color:'var(--red-ink)',     bg:'var(--red-soft)' },
-            { label:'Onboarding Done', value:fullyOnboarded,                                                     color:'var(--violet-ink)', bg:'var(--violet-soft)' },
+            flowOn && { label:'Onboarding Done', value:fullyOnboarded,                                           color:'var(--violet-ink)', bg:'var(--violet-soft)' },
             { label:'Course Progress', value:`${pct}%`,                                                          color:'var(--brand)',       bg:'var(--brand-50)' },
-          ].map(c => (
+          ].filter(Boolean).map(c => (
             <div key={c.label} style={{ background:'var(--surface)', borderRadius:12, border:'1px solid var(--border)', padding:'12px 16px', boxShadow:'var(--shadow-xs)' }}>
               <div style={{ fontSize:11, color:'var(--text-muted)', marginBottom:4, fontWeight:500 }}>{c.label}</div>
               <div style={{ fontSize:22, fontWeight:700, color:c.color, fontFamily:'var(--font-display)' }}>{c.value}</div>
@@ -1402,13 +1520,7 @@ export default function Batches() {
 
         {/* Tab bar */}
         <div className="tab-bar" style={{ marginBottom:16 }}>
-          {[
-            { key:'students',    label:`Students (${count})`               },
-            { key:'onboarding',  label:'Onboarding Analytics'              },
-            { key:'tasks',       label:`Assignments (${batchTasks.length})` },
-            { key:'assessments', label:`Assessments (${batchAssessments.length})` },
-            { key:'staff',       label:`Staff (${batchStaffDetails.filter(s => s.uid !== selectedBatch.mentorId).length + (selectedBatch.mentorId ? 1 : 0)})` },
-          ].map(t => (
+          {tabs.map(t => (
             <div key={t.key} className={`tab ${activeTab===t.key?'active':''}`} onClick={() => { setActiveTab(t.key); setSelectedTask(null); }}>
               {t.label}
             </div>
@@ -1506,13 +1618,13 @@ export default function Batches() {
                       {listFields.map(f => <th key={f.key}>{f.label}</th>)}
                       {flowCols.map(step => <th key={step.key}>{step.fieldLabel || step.label}</th>)}
                       <th>Status</th>
-                      <th>Onboarding</th>
+                      {flowOn && <th>Onboarding</th>}
                       <th></th>
                     </tr>
                   </thead>
                   <tbody>
                     {paginated.length === 0 && (
-                      <tr><td colSpan={listFields.length + flowCols.length + 4} style={{ textAlign:'center', padding:40, color:'#6B7280' }}>
+                      <tr><td colSpan={listFields.length + flowCols.length + (flowOn ? 4 : 3)} style={{ textAlign:'center', padding:40, color:'#6B7280' }}>
                         {studentSearch || studentStatusFilter ? 'No students match your filter.' : 'No students yet.'}
                         {!studentSearch && !studentStatusFilter && (
                           <div style={{ display:'flex', gap:8, justifyContent:'center', marginTop:12 }}>
@@ -1579,11 +1691,13 @@ export default function Batches() {
                               <option value="dropped">Dropped</option>
                             </select>
                           </td>
-                          <td>
-                            <span style={{ fontSize:11, padding:'2px 8px', borderRadius:10, fontWeight:600, background:onboardDone?'#D1FAE5':'#FEF3C7', color:onboardDone?'#065F46':'#92400E' }}>
-                              {flowDone}/{batchFlow.length} {onboardDone ? '' : ''}
-                            </span>
-                          </td>
+                          {flowOn && (
+                            <td>
+                              <span style={{ fontSize:11, padding:'2px 8px', borderRadius:10, fontWeight:600, background:onboardDone?'#D1FAE5':'#FEF3C7', color:onboardDone?'#065F46':'#92400E' }}>
+                                {flowDone}/{batchFlow.length} {onboardDone ? '' : ''}
+                              </span>
+                            </td>
+                          )}
                           <td style={{ display:'flex', gap:4, alignItems:'center' }}>
                             <button className="btn btn-ghost btn-sm" onClick={() => navigate(`/students/${s.id}`, { state: { fromBatchId: selectedBatch.id } })}>View <ChevronRight size={12}/></button>
                             {profile?.role === 'ceo' && (
@@ -2478,6 +2592,30 @@ export default function Batches() {
           </Modal>
         )}
 
+        {/* Change course (CEO) */}
+        {changeCourse !== null && (
+          <Modal title={`Change course — ${selectedBatch.name}`} onClose={() => setChangeCourse(null)}>
+            <div className="form-group">
+              <label className="form-label">Course</label>
+              <select className="form-input" value={changeCourse} onChange={e => setChangeCourse(e.target.value)}>
+                <option value="">Select course</option>
+                {courses.filter(c => c.status !== 'archived' || c.id === selectedBatch.courseId).map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+            <div style={{ padding:'8px 12px', background:'var(--bg)', borderRadius:8, fontSize:12, color:'var(--text-sub)', margin:'10px 0 14px' }}>
+              The batch keeps its own course flow and student fields. Its students' course name is updated, and the new course's feature switches apply.
+            </div>
+            <div style={{ display:'flex', gap:10, justifyContent:'flex-end' }}>
+              <button className="btn btn-ghost" onClick={() => setChangeCourse(null)}>Cancel</button>
+              <button className="btn btn-primary" disabled={saving || !changeCourse || changeCourse === selectedBatch.courseId} onClick={handleChangeCourse}>
+                {saving ? 'Saving...' : 'Move Batch'}
+              </button>
+            </div>
+          </Modal>
+        )}
+
         {/* Course Flow Config */}
         {showFlowConfig && (
           <Modal title={`Configure Course Flow — ${selectedBatch.name}`} onClose={() => setShowFlowConfig(false)} wide persistent>
@@ -2755,13 +2893,24 @@ export default function Batches() {
   }
 
   // ══════════════════════════════════════════════════════════════
-  // BATCH LIST VIEW
+  // BATCH LIST VIEW — level 1: course banners; level 2 (?course=<id>): that
+  // course's batches. `batches` is already limited to a staff member's own
+  // batches, so staff only get banners for courses they teach in.
   // ══════════════════════════════════════════════════════════════
-  const activeBatches    = batches.filter(b => b.status === 'active');
-  const upcomingBatches  = batches.filter(b => b.status === 'upcoming');
-  const completedBatches = batches.filter(b => b.status !== 'active' && b.status !== 'upcoming');
+  const courseGroups = groupBatchesByCourse(batches, courses, { includeEmpty: isCEOorAdmin });
+  const viewCourse   = courseParam && courseParam !== NO_COURSE ? courses.find(c => c.id === courseParam) || null : null;
+  const inCourseView = courseParam === NO_COURSE || !!viewCourse;
+  const courseBatches = !inCourseView ? batches
+    : courseParam === NO_COURSE ? batches.filter(b => !courseOfBatch(b, courses))
+    : batches.filter(b => b.courseId === courseParam);
+  const unlinkedCount = batches.filter(b => !courseOfBatch(b, courses)).length;
+  const viewArchived  = viewCourse?.status === 'archived';
 
-  const byStatus = batchFilter === 'all'       ? batches
+  const activeBatches    = courseBatches.filter(b => b.status === 'active');
+  const upcomingBatches  = courseBatches.filter(b => b.status === 'upcoming');
+  const completedBatches = courseBatches.filter(b => b.status !== 'active' && b.status !== 'upcoming');
+
+  const byStatus = batchFilter === 'all'       ? courseBatches
                  : batchFilter === 'active'    ? activeBatches
                  : batchFilter === 'upcoming'  ? upcomingBatches
                  : completedBatches;
@@ -2770,30 +2919,125 @@ export default function Batches() {
     ? byStatus.filter(b => (b.name || '').toLowerCase().includes(bq) || (b.course || '').toLowerCase().includes(bq))
     : byStatus;
 
+  const cq = courseSearch.trim().toLowerCase();
+  const visibleGroups = cq
+    ? courseGroups.filter(g => (g.course?.name || 'not linked to a course').toLowerCase().includes(cq)
+        || g.batches.some(b => (b.name || '').toLowerCase().includes(cq)))
+    : courseGroups;
+
   return (
     <div>
+      {!inCourseView && (<>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 700, fontFamily: 'var(--font-display)', color: 'var(--text)', margin: 0 }}>Batch Management</h1>
           <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '4px 0 0' }}>
-            Organize courses, cohorts and schedules across all programs.
+            Pick a course to see its batches.
           </p>
         </div>
         {isCEOorAdmin && (
-          <button className="btn btn-primary" onClick={() => setShowCreate(true)}>
-            <Plus size={16}/> Create Batch
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button className="btn btn-ghost" onClick={() => setCourseForm({})}>
+              <Plus size={16}/> Create Course
+            </button>
+            <button className="btn btn-primary" onClick={() => openCreateBatch()}>
+              <Plus size={16}/> Create Batch
+            </button>
+          </div>
+        )}
+      </div>
+
+      {isCEOorAdmin && unlinkedCount > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', padding: '12px 16px', background: 'var(--amber-soft)', border: '1px solid var(--amber)', borderRadius: 10, marginBottom: 16, fontSize: 13, color: 'var(--amber-ink)' }}>
+          <AlertTriangle size={16} style={{ flexShrink: 0 }}/>
+          <div style={{ flex: 1, minWidth: 200 }}>
+            <strong>{unlinkedCount} batch{unlinkedCount === 1 ? ' isn’t' : 'es aren’t'} linked to a course yet.</strong>{' '}
+            Linking groups them by their current course name, creating any missing course with every feature on.
+          </div>
+          <button className="btn btn-sm" disabled={linking} onClick={handleLinkCourses}
+            style={{ background: 'var(--amber-ink)', color: '#fff', border: 'none' }}>
+            {linking ? 'Linking…' : 'Link to courses'}
           </button>
+        </div>
+      )}
+
+      <div style={{ position: 'relative', maxWidth: 340, marginBottom: 20 }}>
+        <Search size={15} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+        <input className="form-input" style={{ height: 38, paddingLeft: 34, width: '100%' }} placeholder="Search course or batch…"
+          value={courseSearch} onChange={e => setCourseSearch(e.target.value)} />
+      </div>
+
+      {courseGroups.length === 0 && (
+        <div className="card" style={{ textAlign:'center', padding:60 }}>
+          {isCEOorAdmin ? (
+            <>
+              <div style={{ fontSize:14, color:'#6B7280', marginBottom:16 }}>No courses yet.</div>
+              <button className="btn btn-primary" onClick={() => setCourseForm({})}><Plus size={16}/> Create First Course</button>
+            </>
+          ) : (
+            <div style={{ fontSize:14, color:'#6B7280' }}>No batches are assigned to you yet.</div>
+          )}
+        </div>
+      )}
+
+      {courseGroups.length > 0 && visibleGroups.length === 0 && (
+        <div className="card" style={{ textAlign:'center', padding:40, color:'var(--text-muted)' }}>
+          No courses or batches match “{courseSearch}”.
+        </div>
+      )}
+
+      <div className="grid-3">
+        {visibleGroups.map(g => (
+          <CourseBanner key={g.id} course={g.course}
+            batchCount={g.batches.length}
+            activeCount={g.batches.filter(b => b.status === 'active').length}
+            studentCount={g.batches.reduce((n, b) => n + (batchCounts[b.id] || 0), 0)}
+            onClick={() => openCourse(g.id)} />
+        ))}
+      </div>
+      </>)}
+
+      {inCourseView && (<>
+      <CourseCrumb course={viewCourse} onBack={() => openCourse(null)} />
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <h1 style={{ fontSize: 22, fontWeight: 700, fontFamily: 'var(--font-display)', color: 'var(--text)', margin: 0 }}>
+              {viewCourse ? viewCourse.name : 'Not linked to a course'}
+            </h1>
+            {viewArchived && <span className="badge badge-gray">Archived</span>}
+          </div>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '4px 0 0' }}>
+            {viewCourse
+              ? (viewCourse.description || `${courseBatches.length} batch${courseBatches.length === 1 ? '' : 'es'}`)
+              : isCEOorAdmin
+                ? 'These batches have no course. Use “Link to courses” on the course list, or open a batch and click its course name to move it.'
+                : 'These batches have no course yet.'}
+          </p>
+        </div>
+        {isCEOorAdmin && viewCourse && (
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button className="btn btn-ghost" onClick={() => setCourseForm(viewCourse)}><Pencil size={14}/> Edit Course</button>
+            <button className="btn btn-ghost" onClick={() => handleArchiveCourse(viewCourse)}>
+              {viewArchived ? 'Restore Course' : 'Archive Course'}
+            </button>
+            {!viewArchived && (
+              <button className="btn btn-primary" onClick={() => openCreateBatch(viewCourse)}>
+                <Plus size={16}/> Create Batch
+              </button>
+            )}
+          </div>
         )}
       </div>
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
         <div style={{ position: 'relative', flex: '1 1 240px', minWidth: 180, maxWidth: 340, order: -1 }}>
           <Search size={15} style={{ position: 'absolute', left: 11, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-          <input className="form-input" style={{ height: 38, paddingLeft: 34, width: '100%' }} placeholder="Search batch by name or course…"
+          <input className="form-input" style={{ height: 38, paddingLeft: 34, width: '100%' }} placeholder="Search batch by name…"
             value={batchListSearch} onChange={e => setBatchListSearch(e.target.value)} />
         </div>
         {[
-          { key: 'all',       label: `All batches ${batches.length}` },
+          { key: 'all',       label: `All batches ${courseBatches.length}` },
           { key: 'active',    label: `Active ${activeBatches.length}` },
           { key: 'upcoming',  label: `Upcoming ${upcomingBatches.length}` },
           { key: 'completed', label: `Completed ${completedBatches.length}` },
@@ -2812,19 +3056,18 @@ export default function Batches() {
         ))}
       </div>
 
-      {batches.length === 0 && (
+      {courseBatches.length === 0 && (
         <div className="card" style={{ textAlign:'center', padding:60 }}>
-          <div style={{ fontSize:14, color:'#6B7280', marginBottom:16 }}>No batches yet.</div>
-          {isCEOorAdmin && <button className="btn btn-primary" onClick={() => setShowCreate(true)}><Plus size={16}/> Create First Batch</button>}
+          <div style={{ fontSize:14, color:'#6B7280', marginBottom:16 }}>No batches in this course yet.</div>
+          {isCEOorAdmin && viewCourse && !viewArchived && <button className="btn btn-primary" onClick={() => openCreateBatch(viewCourse)}><Plus size={16}/> Create First Batch</button>}
         </div>
       )}
 
-      {batches.length > 0 && filteredBatches.length === 0 && (
+      {courseBatches.length > 0 && filteredBatches.length === 0 && (
         <div className="card" style={{ textAlign:'center', padding:40, color:'var(--text-muted)' }}>
           No batches match{batchListSearch ? ` “${batchListSearch}”` : ' this filter'}.
         </div>
       )}
-
       <div className="grid-3">
         {filteredBatches.map(b => {
           const studentCount = batchCounts[b.id] || 0;
@@ -2902,6 +3145,7 @@ export default function Batches() {
           );
         })}
       </div>
+      </>)}
 
       {/* Create Batch Modal */}
       {showCreate && (
@@ -2911,27 +3155,13 @@ export default function Batches() {
             <FormRow>
               <div className="form-group">
                 <label className="form-label">Course *</label>
-                {(() => {
-                  // Options: ISC Level 1 + any custom course previously saved on a
-                  // batch (excludes the removed legacy courses) + "Other".
-                  const custom = [...new Set(batches.map(b => b.course).filter(Boolean))]
-                    .filter(c => !BASE_COURSES.includes(c) && !LEGACY_COURSES.includes(c));
-                  const options = [...BASE_COURSES, ...custom];
-                  return (
-                    <select className="form-input" value={createForm.courseIsOther ? OTHER_COURSE : createForm.course}
-                      onChange={e => {
-                        if (e.target.value === OTHER_COURSE) setCreateForm({ ...createForm, courseIsOther: true, course: '' });
-                        else setCreateForm({ ...createForm, courseIsOther: false, course: e.target.value });
-                      }}>
-                      <option value="">Select</option>
-                      {options.map(c => <option key={c} value={c}>{c}</option>)}
-                      <option value={OTHER_COURSE}>Other (type a new course)…</option>
-                    </select>
-                  );
-                })()}
-                {createForm.courseIsOther && (
-                  <input className="form-input" style={{ marginTop:8 }} autoFocus placeholder="e.g. ISC Level 3"
-                    value={createForm.course} onChange={e => setCreateForm({ ...createForm, course: e.target.value })}/>
+                <select className="form-input" required value={createForm.courseId}
+                  onChange={e => setCreateForm(f => applyCourseToForm(f, courses.find(c => c.id === e.target.value)))}>
+                  <option value="">Select course</option>
+                  {courses.filter(c => c.status !== 'archived').map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                {courses.filter(c => c.status !== 'archived').length === 0 && (
+                  <div style={{ fontSize:11.5, color:'var(--amber-ink)', marginTop:4 }}>No courses yet — create a course first.</div>
                 )}
               </div>
               <div className="form-group">
@@ -2989,7 +3219,7 @@ export default function Batches() {
               </div>
             </FormRow>
             <div style={{ padding:'10px 12px', background:'#EFF6FF', borderRadius:8, fontSize:12, color:'#1E40AF' }}>
-              After creating the batch, use "Course Flow", "Student Fields", and "Subjects" buttons inside to customize them.
+              The batch starts with its course's flow and student fields. Customise them inside the batch with the "Course Flow", "Student Fields" and "Subjects" buttons.
             </div>
             <div style={{ display:'flex', gap:10, justifyContent:'flex-end' }}>
               <button type="button" className="btn btn-ghost" onClick={() => setShowCreate(false)}>Cancel</button>
@@ -2997,6 +3227,12 @@ export default function Batches() {
             </div>
           </form>
         </Modal>
+      )}
+
+      {/* Create / Edit Course Modal */}
+      {courseForm && (
+        <CourseFormModal initial={courseForm} templates={COURSE_TEMPLATES} saving={savingCourse}
+          onClose={() => setCourseForm(null)} onSave={handleSaveCourse} />
       )}
 
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)}/>}

@@ -367,6 +367,91 @@ export const addBatch = async (data) =>
 export const updateBatch = async (id, data) =>
   updateDoc(doc(db,'batches', id), data);
 
+// ── Courses ────────────────────────────────────────────────────
+// A course sits above batches: it owns the feature switches (see
+// src/lib/courses.js) and the flow/fields template copied into new batches.
+// Batches carry courseId + the denormalized `course` name; students keep only
+// the `course` name (their course is always read through their batch).
+// Reads fail soft (empty list) so pages still work if the courses rules
+// aren't deployed yet — every feature then counts as ON.
+export const getCourses = async () => {
+  try {
+    const snap = await getDocs(collection(db, 'courses'));
+    return snap.docs.map(d => ({ id: d.id, ...d.data() })).sort(byNameAsc);
+  } catch (err) {
+    import.meta.env.DEV && console.warn('getCourses failed:', err.message);
+    return [];
+  }
+};
+
+export const subscribeCourses = (cb) =>
+  listen(collection(db, 'courses'), cb, { sort: byNameAsc, onError: () => cb([]) });
+
+export const addCourse = async (data) =>
+  addDoc(collection(db, 'courses'), { ...data, status: 'active', createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+
+// Re-stamp the denormalized course name on a batch's students.
+const stampCourseOnStudents = async (batchId, courseName) => {
+  const snap = await getDocs(query(collection(db, 'students'), where('batchId', '==', batchId)));
+  await Promise.all(snap.docs.map(d => updateDoc(d.ref, { course: courseName })));
+  return snap.docs.length;
+};
+
+// Renaming a course copies the new name onto its batches and their students.
+export const updateCourse = async (id, data, batches = []) => {
+  await updateDoc(doc(db, 'courses', id), { ...data, updatedAt: serverTimestamp() });
+  if (data.name === undefined) return;
+  const linked = batches.filter(b => b.courseId === id);
+  await Promise.all(linked.map(async b => {
+    await updateDoc(doc(db, 'batches', b.id), { course: data.name });
+    await stampCourseOnStudents(b.id, data.name);
+  }));
+};
+
+// Move a batch to another course (CEO).
+export const setBatchCourse = async (batch, course) => {
+  await updateDoc(doc(db, 'batches', batch.id), { courseId: course.id, course: course.name });
+  await stampCourseOnStudents(batch.id, course.name);
+};
+
+// One-time migration: link batches that only have a free-text `course` name
+// to a course doc, creating courses (all features ON) as needed.
+export const linkBatchesToCourses = async (batches, courses, { features, courseFlow, studentFields }) => {
+  const known = new Set(courses.map(c => c.id));
+  const keyOf = (s) => (s || '').trim().toLowerCase();
+  const groups = new Map();
+  batches
+    .filter(b => (!b.courseId || !known.has(b.courseId)) && keyOf(b.course))
+    .forEach(b => {
+      const k = keyOf(b.course);
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k).push(b);
+    });
+
+  let created = 0, linked = 0;
+  for (const [k, group] of groups) {
+    let course = courses.find(c => keyOf(c.name) === k);
+    if (!course) {
+      const first = group[0];
+      const data = {
+        name: first.course.trim(), description: '', color: '',
+        features: { ...features },
+        courseFlow: first.courseFlow || courseFlow,
+        studentFields: first.studentFields || studentFields,
+        durationMonths: first.courseDurationMonths || '',
+      };
+      const ref = await addCourse(data);
+      course = { id: ref.id, ...data };
+      created++;
+    }
+    for (const b of group) {
+      await updateDoc(doc(db, 'batches', b.id), { courseId: course.id, course: course.name });
+      linked++;
+    }
+  }
+  return { created, linked };
+};
+
 // ── Batch Schedules ────────────────────────────────────────────
 export const getBatchSchedules = async (batchId) => {
   const q = query(collection(db,'schedules'), where('batchId','==',batchId));

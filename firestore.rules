@@ -87,6 +87,12 @@ service cloud.firestore {
       allow create, update, delete: if isCEO();
     }
 
+    // ── courses — sit above batches; feature switches + templates ──
+    match /courses/{id} {
+      allow read: if isActiveStaff();
+      allow create, update, delete: if isCEO();
+    }
+
     // ── schedules — shared calendar, all active staff by design ──
     match /schedules/{id} {
       allow read, create, update: if isActiveStaff();
