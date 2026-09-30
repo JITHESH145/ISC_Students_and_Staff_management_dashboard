@@ -3,8 +3,10 @@ import { useNavigate, Link } from 'react-router-dom';
 import {
   getMyStudents, getMyTasks, getMyFollowUps, getStaffBatches,
   getMyNotifications, markNotificationRead, getMyRequests, updateRequest, addNotification, createRequest,
-  getBatchSchedules, getBatchTasks, getAssessments,
+  getBatchSchedules, getBatchTasks, getAssessments, getCourses,
 } from '../firebase/services';
+import { batchesInCourse } from '../lib/courses';
+import { CourseSelect } from '../components/courses';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { Loading, Toast } from '../components/ui';
@@ -77,6 +79,11 @@ export default function StaffDashboard() {
   const [hubTypeFilter, setHubTypeFilter] = useState('');
   const [hubCourse,     setHubCourse]     = useState('');
   const [hubTimeFilter, setHubTimeFilter] = useState('active'); // 'active'|'upcoming'|'past'|'all'
+  // Course pickers: staff choose a course, then one of their batches in it.
+  // Only courses containing this staff member's batches are listed.
+  const [courses,       setCourses]       = useState([]);
+  const [hubCourseId,   setHubCourseId]   = useState('');
+  const [recentCourse,  setRecentCourse]  = useState('');
   const HUB_PAGE = 20;
   const [hubPage, setHubPage] = useState(0);
 
@@ -96,6 +103,7 @@ export default function StaffDashboard() {
   useEffect(() => {
     const load = async () => {
       try {
+        getCourses().then(setCourses);
         const [s, t, f, b, n, r] = await Promise.all([
           getMyStudents(profile?.name, profile?.uid).catch(() => []),
           getMyTasks(profile?.email).catch(() => []),
@@ -326,6 +334,8 @@ export default function StaffDashboard() {
       : (s.joiningDate ? new Date(s.joiningDate).getTime() : null);
     return ts && (nowMs - ts) <= SEVEN_DAYS_MS;
   }).sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+  const recentCourseIds = recentCourse ? new Set(batchesInCourse(myBatches, courses, recentCourse).map(b => b.id)) : null;
+  const newStudentsShown = newStudents.filter(s => !recentCourseIds || recentCourseIds.has(s.batchId));
 
   return (
     <div>
@@ -479,15 +489,19 @@ export default function StaffDashboard() {
         <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12 }}>
           <Users size={16} style={{ color:'var(--brand)' }}/>
           <h3 style={{ fontSize:15, fontWeight:700 }}>Recently Joined Students</h3>
-          <span className="badge badge-green" style={{ marginLeft:2 }}>{newStudents.length} · last 7 days</span>
+          <span className="badge badge-green" style={{ marginLeft:2 }}>{newStudentsShown.length} · last 7 days</span>
+          <div style={{ marginLeft:'auto' }}>
+            <CourseSelect courses={courses.filter(c => myBatches.some(b => b.courseId === c.id))} batches={myBatches}
+              value={recentCourse} onChange={setRecentCourse} style={{ height:32, fontSize:12 }} />
+          </div>
         </div>
-        {newStudents.length === 0 ? (
+        {newStudentsShown.length === 0 ? (
           <div style={{ color:'#9CA3AF', fontSize:13, textAlign:'center', padding:'24px 0' }}>
-            No students joined in the last 7 days.
+            No students joined in the last 7 days{recentCourse ? ' in this course' : ''}.
           </div>
         ) : (
           <div style={{ display:'flex', flexDirection:'column', gap:6, maxHeight:280, overflowY:'auto', paddingRight:4 }}>
-            {newStudents.map(s => (
+            {newStudentsShown.map(s => (
               <div key={s.id} onClick={() => navigate(`/students/${s.id}`)}
                 style={{ display:'flex', alignItems:'center', gap:12, padding:'9px 12px', borderRadius:10, border:'1px solid #E5E7EB', cursor:'pointer' }}
                 onMouseEnter={e => e.currentTarget.style.background='#F8FAFC'}
@@ -534,9 +548,18 @@ export default function StaffDashboard() {
           <div style={{ ...CARD, marginBottom: 20 }}>
             {/* Title + batch chips row */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
-              <h3 style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>Batch Activity Hub <span style={{ fontSize: 12, color: '#9CA3AF', fontWeight: 400 }}>(active only)</span></h3>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <h3 style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>Batch Activity Hub <span style={{ fontSize: 12, color: '#9CA3AF', fontWeight: 400 }}>(active only)</span></h3>
+                <CourseSelect courses={courses.filter(c => myBatches.some(b => b.courseId === c.id))} batches={myBatches}
+                  value={hubCourseId} style={{ height: 32, fontSize: 12 }}
+                  onChange={v => {
+                    setHubCourseId(v);
+                    // Drop the selected batch if it isn't in the chosen course.
+                    if (hubBatch && !batchesInCourse(myBatches, courses, v).some(b => b.id === hubBatch)) setHubBatch('');
+                  }} />
+              </div>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                {myBatches.map(b => (
+                {batchesInCourse(myBatches, courses, hubCourseId).map(b => (
                   <button key={b.id} onClick={() => { setHubBatch(prev => prev === b.id ? '' : b.id); setHubFilter('all'); setHubTypeFilter(''); setHubSearch(''); setHubPage(0); }}
                     style={{ padding: '5px 14px', borderRadius: 20, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, transition: 'all 0.15s',
                       background: hubBatch === b.id ? 'var(--brand)' : '#F3F4F6',
