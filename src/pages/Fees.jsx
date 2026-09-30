@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { getBatches, getBatchStudents, getFeesByBatch, saveFee, updateBatch } from '../firebase/services';
+import { getBatches, getBatchStudents, getFeesByBatch, saveFee, updateBatch, getCourses } from '../firebase/services';
+import { batchesInCourse } from '../lib/courses';
+import { CourseSelect } from '../components/courses';
 import { useAuth } from '../context/AuthContext';
 import { Modal, Toast, Loading, Confirm } from '../components/ui';
 import { Wallet, Plus, Search, Trash2, Edit2, CheckCircle, TrendingUp, AlertTriangle, School, Eye } from 'lucide-react';
@@ -60,6 +62,10 @@ export default function Fees() {
 
   const [batches, setBatches] = useState([]);
   const [batchId, setBatchId] = useState(restoreFees?.batchId || '');
+  // Course only narrows which batches are listed / included in "All batches";
+  // fees themselves stay per batch and per student.
+  const [courses, setCourses]     = useState([]);
+  const [feeCourse, setFeeCourse] = useState(restoreFees?.feeCourse || '');
   const [batchFeeInput, setBatchFeeInput] = useState('');
   const [savingBatchFee, setSavingBatchFee] = useState(false);
   const [rows, setRows] = useState([]);            // { student, fee }
@@ -85,6 +91,7 @@ export default function Fees() {
       setBatches(list);
       setBatchId(prev => prev || 'ALL');
     }).catch(() => {});
+    getCourses().then(setCourses);
   }, []);
 
   // Fees is a CEO/Admin financial screen that joins students + fee docs per
@@ -123,7 +130,7 @@ export default function Fees() {
     setLoading(true);
     let merged = [];
     if (bid === 'ALL') {
-      const chunks = await Promise.all(batches.map(b => loadOneBatch(b)));
+      const chunks = await Promise.all(batchesInCourse(batches, courses, feeCourse).map(b => loadOneBatch(b)));
       merged = chunks.flat();
     } else {
       const b = batches.find(x => x.id === bid);
@@ -132,7 +139,7 @@ export default function Fees() {
     setRows(merged);
     setLoading(false);
   };
-  useEffect(() => { loadBatch(batchId); /* eslint-disable-next-line */ }, [batchId, batches, refreshKey]);
+  useEffect(() => { loadBatch(batchId); /* eslint-disable-next-line */ }, [batchId, batches, refreshKey, feeCourse, courses]);
 
   const isAllBatches = batchId === 'ALL';
   const batch = batches.find(b => b.id === batchId);
@@ -192,7 +199,7 @@ export default function Fees() {
   // filters so the back button can return to this exact view.
   const viewOverview = (student, e) => {
     e.stopPropagation();
-    navigate(`/students/${student.id}`, { state: { fromFees: true, restoreFees: { batchId, statusFilter, search } } });
+    navigate(`/students/${student.id}`, { state: { fromFees: true, restoreFees: { batchId, feeCourse, statusFilter, search } } });
   };
 
   const addOrUpdatePayment = () => {
@@ -268,10 +275,15 @@ export default function Fees() {
 
       {/* Controls */}
       <div className="mobile-stack" style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+        <CourseSelect courses={courses} batches={batches} value={feeCourse} style={{ minWidth: 160, height: 40 }}
+          onChange={v => {
+            setFeeCourse(v);
+            if (batchId !== 'ALL' && !batchesInCourse(batches, courses, v).some(b => b.id === batchId)) setBatchId('ALL');
+          }} />
         <select className="form-input" style={{ width: 'auto', minWidth: 200, height: 40 }} value={batchId} onChange={e => setBatchId(e.target.value)}>
           <option value="">Select a batch…</option>
-          <option value="ALL">All batches ({batches.length})</option>
-          {batches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+          <option value="ALL">{feeCourse ? 'All batches in this course' : 'All batches'} ({batchesInCourse(batches, courses, feeCourse).length})</option>
+          {batchesInCourse(batches, courses, feeCourse).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
         </select>
         {batchId && !isAllBatches && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 9, padding: '4px 6px 4px 12px' }}
