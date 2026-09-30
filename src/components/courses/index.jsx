@@ -63,11 +63,12 @@ export function CourseCrumb({ course, onBack, children }) {
 }
 
 // ── Course filter dropdown (sits in front of a batch dropdown) ─
-// Lists only courses that have at least one of `batches`, plus "Not linked
-// to a course" when some batches have none. Renders nothing when there are
-// no courses yet, so pages look exactly as before courses existed.
+// Lists every active course (even one with no batches yet) plus archived
+// courses that still have batches, and "Not linked to a course" when some
+// batches have none. Renders nothing when there are no courses yet, so pages
+// look exactly as before courses existed.
 export function CourseSelect({ courses, batches, value, onChange, allLabel = 'All courses', style, className = 'form-input' }) {
-  const used = courses.filter(c => batches.some(b => b.courseId === c.id));
+  const used = courses.filter(c => c.status !== 'archived' || batches.some(b => b.courseId === c.id));
   const hasUnlinked = batches.some(b => !courseOfBatch(b, courses));
   if (!used.length) return null;
   return (
