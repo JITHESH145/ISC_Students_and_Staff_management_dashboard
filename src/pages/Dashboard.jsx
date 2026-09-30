@@ -3,8 +3,10 @@ import { Link, useNavigate } from 'react-router-dom';
 import {
   getBatches, getBatchStudentCount, getTasks, getAllFollowUps, isFollowUpNote,
   getRequests, addNotification, updateRequest, markNotificationRead,
-  getBatchSchedules, getAssessments, getBatchTasks,
+  getBatchSchedules, getAssessments, getBatchTasks, getCourses,
 } from '../firebase/services';
+import { batchesInCourse } from '../lib/courses';
+import { CourseSelect } from '../components/courses';
 import { query, collection, where, limit, orderBy, getDocs, getCountFromServer } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import { Loading } from '../components/ui';
@@ -48,10 +50,12 @@ function timeAgo(ts){
   return `${Math.floor(diff/86400)}d ago`;
 }
 
-function BatchActivityHub({ batches, schedBatch, setSchedBatch, schedFilter, setSchedFilter,
+function BatchActivityHub({ batches, courses = [], schedBatch, setSchedBatch, schedFilter, setSchedFilter,
   schedItems, schedLoading, navigate,
   schedTimeFilter, setSchedTimeFilter, schedCourse, setSchedCourse, schedTypeFilter, setSchedTypeFilter }) {
   const [search, setSearch] = useState('');
+  const [hubCourse, setHubCourse] = useState('');
+  const hubBatches = batchesInCourse(batches, courses, hubCourse);
 
   const kindColors = {
     schedule:   { dot:'var(--blue)',  bg:'var(--blue-soft)',   ink:'var(--blue-ink)'  },
@@ -76,9 +80,18 @@ function BatchActivityHub({ batches, schedBatch, setSchedBatch, schedFilter, set
     <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:16, boxShadow:'var(--shadow-sm)', marginBottom:18, overflow:'hidden' }}>
       <div style={{ padding:'16px 20px 14px' }}>
         <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', flexWrap:'wrap', gap:10, marginBottom:14 }}>
-          <h3 style={{ fontSize:16, fontWeight:700 }}>Batch Activity Hub</h3>
+          <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
+            <h3 style={{ fontSize:16, fontWeight:700 }}>Batch Activity Hub</h3>
+            <CourseSelect courses={courses} batches={batches} value={hubCourse} style={{ height:32, fontSize:12 }}
+              onChange={v => {
+                setHubCourse(v);
+                // Drop the selected batch if it isn't in the chosen course.
+                if (schedBatch && !batchesInCourse(batches, courses, v).some(b => b.id === schedBatch)) setSchedBatch('');
+              }} />
+          </div>
           <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
-            {batches.map(b => (
+            {hubBatches.length === 0 && <span style={{ fontSize:12, color:'var(--text-muted)' }}>No batches in this course.</span>}
+            {hubBatches.map(b => (
               <button key={b.id} onClick={() => { setSchedBatch(b.id); clearAll(); }}
                 style={{ padding:'5px 14px', borderRadius:20, border:'none', cursor:'pointer', fontSize:12, fontWeight:600, transition:'all .15s',
                   background: schedBatch === b.id ? 'var(--brand)' : 'var(--surface-sunken)',
@@ -185,6 +198,9 @@ export default function Dashboard() {
   const [atRiskCount, setAtRiskCount]     = useState(0);
   const [batches, setBatches]             = useState([]);
   const [batchRows, setBatchRows]         = useState([]);
+  const [courses, setCourses]             = useState([]);
+  const [recentCourse, setRecentCourse]   = useState('');   // Recently Joined course filter
+  const [overviewCourse, setOverviewCourse] = useState(''); // Batches Overview course filter
   const [recentActivity, setRecentActivity] = useState([]);
   const [recentStudents, setRecentStudents] = useState([]);
   const [pendingTasks, setPendingTasks]   = useState([]);
@@ -224,6 +240,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     const load = async () => {
+      getCourses().then(setCourses);
       try {
         const totalSnap = await getCountFromServer(collection(db, 'students'));
         setTotalStudents(totalSnap.data().count);
@@ -380,6 +397,11 @@ export default function Dashboard() {
   if (loading) return <Loading text="Loading dashboard…" />;
 
   const activeBatches = batches.filter(b => b.status === 'active');
+  // Course filters: a student/batch belongs to a course through its batch.
+  const recentCourseIds = recentCourse ? new Set(batchesInCourse(batches, courses, recentCourse).map(b => b.id)) : null;
+  const recentShown  = recentStudents.filter(s => !recentCourseIds || recentCourseIds.has(s.batchId));
+  const overviewIds  = overviewCourse ? new Set(batchesInCourse(batches, courses, overviewCourse).map(b => b.id)) : null;
+  const overviewRows = batchRows.filter(r => !overviewIds || overviewIds.has(r.batch.id));
   const unreadNotifs  = notifications.filter(n => !n.read).length;
 
   // Only surface RECENT activity — items from the last ~36h — so the dashboard
@@ -595,15 +617,18 @@ export default function Dashboard() {
         <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12 }}>
           <Users size={16} style={{ color:'var(--brand)' }} />
           <h3 style={{ fontSize:15, fontWeight:700 }}>Recently Joined Students</h3>
-          <span className="badge badge-green" style={{ marginLeft:2 }}>{recentStudents.length} · last 7 days</span>
+          <span className="badge badge-green" style={{ marginLeft:2 }}>{recentShown.length} · last 7 days</span>
+          <div style={{ marginLeft:'auto' }}>
+            <CourseSelect courses={courses} batches={batches} value={recentCourse} onChange={setRecentCourse} style={{ height:32, fontSize:12 }} />
+          </div>
         </div>
-        {recentStudents.length === 0 ? (
+        {recentShown.length === 0 ? (
           <div style={{ color:'var(--text-muted)', fontSize:13, textAlign:'center', padding:'24px 0' }}>
-            No students joined in the last 7 days.
+            No students joined in the last 7 days{recentCourse ? ' in this course' : ''}.
           </div>
         ) : (
           <div style={{ display:'flex', flexDirection:'column', gap:6, maxHeight:300, overflowY:'auto', paddingRight:4 }}>
-            {recentStudents.map(s => (
+            {recentShown.map(s => (
               <div key={s.id} onClick={() => navigate(`/students/${s.id}`)}
                 style={{ display:'flex', alignItems:'center', gap:12, padding:'9px 12px', borderRadius:10, border:'1px solid var(--border)', cursor:'pointer', transition:'background .12s' }}
                 onMouseEnter={e => e.currentTarget.style.background='var(--surface-hover)'}
@@ -623,7 +648,7 @@ export default function Dashboard() {
 
       {/* Staff: Batch Activity Hub */}
       {!isCEOorAdmin && (
-        <BatchActivityHub batches={batches} schedBatch={schedBatch} setSchedBatch={setSchedBatch}
+        <BatchActivityHub batches={batches} courses={courses} schedBatch={schedBatch} setSchedBatch={setSchedBatch}
           schedFilter={schedFilter} setSchedFilter={setSchedFilter}
           schedItems={schedItems} schedLoading={schedLoading} navigate={navigate}
           schedTimeFilter={schedTimeFilter} setSchedTimeFilter={setSchedTimeFilter}
@@ -635,8 +660,11 @@ export default function Dashboard() {
       {isCEOorAdmin && (
         <div style={{ background:'var(--surface)', border:'1px solid var(--border)', borderRadius:16, boxShadow:'var(--shadow-sm)', marginBottom:18, overflow:'hidden' }}>
           <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'16px 20px 14px' }}>
-            <h3 style={{ fontSize:16, fontWeight:700 }}>Batches Overview</h3>
-            <Link to="/batches" style={{ fontSize:12.5, color:'var(--brand)', fontWeight:600, display:'flex', alignItems:'center', gap:3 }}>
+            <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
+              <h3 style={{ fontSize:16, fontWeight:700 }}>Batches Overview</h3>
+              <CourseSelect courses={courses} batches={batches} value={overviewCourse} onChange={setOverviewCourse} style={{ height:32, fontSize:12 }} />
+            </div>
+            <Link to={overviewCourse ? `/batches?course=${overviewCourse}` : '/batches'} style={{ fontSize:12.5, color:'var(--brand)', fontWeight:600, display:'flex', alignItems:'center', gap:3 }}>
               Manage batches <ChevronRight size={14} />
             </Link>
           </div>
@@ -653,10 +681,10 @@ export default function Dashboard() {
                 </tr>
               </thead>
               <tbody>
-                {batchRows.length === 0 && (
-                  <tr><td colSpan={6} style={{ textAlign:'center', padding:32, color:'var(--text-muted)' }}>No batches yet.</td></tr>
+                {overviewRows.length === 0 && (
+                  <tr><td colSpan={6} style={{ textAlign:'center', padding:32, color:'var(--text-muted)' }}>{overviewCourse ? 'No batches in this course.' : 'No batches yet.'}</td></tr>
                 )}
-                {batchRows.map(({ batch, count, onboardedCount }) => {
+                {overviewRows.map(({ batch, count, onboardedCount }) => {
                   const flow = batch.courseFlow || [];
                   const onboardPct = count > 0 && flow.length > 0 ? Math.round(onboardedCount/count*100) : 0;
                   const barColor = onboardPct===100 ? 'var(--green)' : onboardPct>=60 ? 'var(--amber)' : 'var(--red)';
@@ -790,7 +818,7 @@ export default function Dashboard() {
       {/* CEO: Batch Activity Hub at bottom */}
       {isCEOorAdmin && (
         <div style={{ marginTop:18 }}>
-          <BatchActivityHub batches={batches} schedBatch={schedBatch} setSchedBatch={setSchedBatch}
+          <BatchActivityHub batches={batches} courses={courses} schedBatch={schedBatch} setSchedBatch={setSchedBatch}
             schedFilter={schedFilter} setSchedFilter={setSchedFilter}
             schedItems={schedItems} schedLoading={schedLoading} navigate={navigate}
             schedTimeFilter={schedTimeFilter} setSchedTimeFilter={setSchedTimeFilter}
