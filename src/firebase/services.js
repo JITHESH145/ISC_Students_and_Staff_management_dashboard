@@ -316,6 +316,12 @@ export const addFollowUpNote = async (data) =>
 // Notes saved before `kind` existed have no assignee — treat those as notes too.
 export const isFollowUpNote = (f) => f.kind === 'note' || !f.assignedToEmail;
 
+// Notes can be corrected or removed by their author or the CEO (rules enforce).
+export const updateFollowUpNote = async (id, note) =>
+  updateDoc(doc(db,'followups', id), { note, editedAt: serverTimestamp() });
+
+export const deleteFollowUpNote = async (id) => deleteDoc(doc(db,'followups', id));
+
 export const completeFollowUp = async (id, note) =>
   updateDoc(doc(db,'followups', id), { completed: true, completionNote: note, completedAt: serverTimestamp() });
 

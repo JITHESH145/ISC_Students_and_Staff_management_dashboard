@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { subscribeAllFollowUps, isFollowUpNote, getStudents, addFollowUp, completeFollowUp, notifyStaff, getStaffProfiles, getBatches, getBatchStudents } from '../firebase/services';
-import { Modal, Toast, Loading, Avatar, FormRow } from '../components/ui';
+import { subscribeAllFollowUps, isFollowUpNote, updateFollowUpNote, deleteFollowUpNote, getStudents, addFollowUp, completeFollowUp, notifyStaff, getStaffProfiles, getBatches, getBatchStudents } from '../firebase/services';
+import { Modal, Toast, Loading, Avatar, FormRow, Confirm } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
-import { Plus, Search, Mail, CheckCircle, Clock, StickyNote } from 'lucide-react';
+import { Plus, Search, Mail, CheckCircle, Clock, StickyNote, Edit, Trash2 } from 'lucide-react';
 
 export default function FollowUps() {
   const { profile, user } = useAuth();
@@ -26,6 +26,8 @@ export default function FollowUps() {
   const [toast, setToast]           = useState(null);
   const [saving, setSaving]         = useState(false);
   const [expanded, setExpanded]     = useState(() => new Set());
+  const [editingNote, setEditingNote] = useState(null); // { id, text }
+  const [confirmBox, setConfirmBox] = useState(null);
   const [form, setForm] = useState({
     batchId: '',
     studentId: '', studentName: '',
@@ -159,6 +161,37 @@ export default function FollowUps() {
     return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
   };
 
+  // Author or CEO may edit/delete a note (mirrors the followups rules).
+  const canManageNote = (n) => isCEOorAdmin || (!!user?.email && n.assignedByEmail === user.email);
+
+  const handleSaveNoteEdit = async () => {
+    const text = editingNote.text.trim();
+    if (!text) return;
+    setSaving(true);
+    try {
+      await updateFollowUpNote(editingNote.id, text);
+      setEditingNote(null);
+      setToast({ message: 'Note updated.', type: 'success' });
+    } catch {
+      setToast({ message: 'Could not update the note.', type: 'error' });
+    } finally { setSaving(false); }
+  };
+
+  const handleDeleteNote = (n) => {
+    setConfirmBox({
+      message: `Delete this note for "${n.studentName || 'student'}"? This cannot be undone.`,
+      onConfirm: async () => {
+        setConfirmBox(null);
+        try {
+          await deleteFollowUpNote(n.id);
+          setToast({ message: 'Note deleted.', type: 'info' });
+        } catch {
+          setToast({ message: 'Could not delete the note.', type: 'error' });
+        }
+      },
+    });
+  };
+
   const formatDateTime = (ts) => {
     if (!ts) return '—';
     const d = ts.toDate ? ts.toDate() : new Date(ts);
@@ -269,8 +302,28 @@ export default function FollowUps() {
                     </div>
                   </div>
                   <span className="badge badge-gray"><StickyNote size={11} style={{ marginRight: 3 }} />Note</span>
+                  {canManageNote(n) && editingNote?.id !== n.id && (
+                    <div style={{ display: 'flex', gap: 2, flexShrink: 0 }}>
+                      <button className="btn btn-ghost btn-sm btn-icon" title="Edit" onClick={() => setEditingNote({ id: n.id, text: n.note || '' })}><Edit size={13} /></button>
+                      <button className="btn btn-ghost btn-sm btn-icon" title="Delete" style={{ color: 'var(--red-ink)' }} onClick={() => handleDeleteNote(n)}><Trash2 size={13} /></button>
+                    </div>
+                  )}
                 </div>
-                <div style={{ fontSize: 13, lineHeight: 1.5, overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>{n.note}</div>
+                {editingNote?.id === n.id ? (
+                  <>
+                    <textarea className="form-input" rows={3} autoFocus value={editingNote.text}
+                      onChange={e => setEditingNote({ ...editingNote, text: e.target.value })} />
+                    <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
+                      <button className="btn btn-ghost btn-sm" onClick={() => setEditingNote(null)} disabled={saving}>Cancel</button>
+                      <button className="btn btn-primary btn-sm" onClick={handleSaveNoteEdit} disabled={saving || !editingNote.text.trim()}>{saving ? 'Saving...' : 'Save'}</button>
+                    </div>
+                  </>
+                ) : (
+                  <div style={{ fontSize: 13, lineHeight: 1.5, overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>
+                    {n.note}
+                    {n.editedAt && <span style={{ fontSize: 11, color: 'var(--muted)' }}> (edited)</span>}
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -486,6 +539,7 @@ export default function FollowUps() {
       )}
 
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+      {confirmBox && <Confirm message={confirmBox.message} confirmLabel="Delete" onConfirm={confirmBox.onConfirm} onCancel={() => setConfirmBox(null)} />}
     </div>
   );
 }

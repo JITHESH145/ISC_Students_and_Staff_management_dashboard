@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import {
   getStudent, updateStudent, getBatches,
-  getFollowUps, addFollowUpNote, getAssessments, addAssessment,
+  getFollowUps, addFollowUpNote, isFollowUpNote, updateFollowUpNote, deleteFollowUpNote,
+  getAssessments, addAssessment,
   getStaffProfiles, updateWeakSubjects, updateCourseFlowStep, addNotification,
   getStudentReports, getStudentAttendanceSummary, getBatchTasks,
   getStudentBatchAssessments,
@@ -127,6 +128,7 @@ export default function StudentProfile() {
   // Follow-up note
   const [newNote,    setNewNote]    = useState('');
   const [savingNote, setSavingNote] = useState(false);
+  const [editingNote, setEditingNote] = useState(null); // { id, text }
 
   // Weak subjects
   const [weakModal,   setWeakModal]   = useState(false);
@@ -287,6 +289,44 @@ export default function StudentProfile() {
     } finally {
       setSavingNote(false);
     }
+  };
+
+  // Profile notes (not assigned follow-ups) can be edited/deleted by their
+  // author or the CEO — mirrors the followups rules.
+  const canManageNote = (f) => isFollowUpNote(f)
+    && (isCEOorAdmin || (!!user?.email && f.assignedByEmail === user.email));
+
+  const handleSaveNoteEdit = async () => {
+    const text = editingNote.text.trim();
+    if (!text) return;
+    setSavingNote(true);
+    try {
+      await updateFollowUpNote(editingNote.id, text);
+      setFollowups(prev => prev.map(f => f.id === editingNote.id ? { ...f, note: text, editedAt: new Date() } : f));
+      setEditingNote(null);
+      setToast({ message: 'Note updated.', type: 'success' });
+    } catch {
+      setToast({ message: 'Could not update the note.', type: 'error' });
+    } finally {
+      setSavingNote(false);
+    }
+  };
+
+  const handleDeleteNote = (f) => {
+    setConfirmBox({
+      message: 'Delete this follow-up note? This cannot be undone.',
+      confirmLabel: 'Delete',
+      onConfirm: async () => {
+        setConfirmBox(null);
+        try {
+          await deleteFollowUpNote(f.id);
+          setFollowups(prev => prev.filter(x => x.id !== f.id));
+          setToast({ message: 'Note deleted.', type: 'info' });
+        } catch {
+          setToast({ message: 'Could not delete the note.', type: 'error' });
+        }
+      },
+    });
   };
 
   // Save edit
@@ -1105,11 +1145,33 @@ export default function StudentProfile() {
                     {i < followups.length-1 && <div style={{ width:1, flex:1, background:'#E5E7EB', margin:'4px 0' }}/>}
                   </div>
                   <div style={{ flex:1, minWidth:0, paddingBottom:4 }}>
-                    <div style={{ fontSize:11, color:'#9CA3AF', marginBottom:3 }}>
-                      {fmt(f.createdAt)} · {f.addedBy || f.assignedBy}
-                      {f.assignedTo && <> → {f.assignedTo}</>}
+                    <div style={{ display:'flex', alignItems:'flex-start', gap:6 }}>
+                      <div style={{ flex:1, minWidth:0, fontSize:11, color:'#9CA3AF', marginBottom:3 }}>
+                        {fmt(f.createdAt)} · {f.addedBy || f.assignedBy}
+                        {f.assignedTo && <> → {f.assignedTo}</>}
+                      </div>
+                      {canManageNote(f) && editingNote?.id !== f.id && (
+                        <div style={{ display:'flex', gap:2, flexShrink:0 }}>
+                          <button className="btn btn-ghost btn-sm btn-icon" title="Edit" onClick={() => setEditingNote({ id: f.id, text: f.note || '' })}><Edit size={13}/></button>
+                          <button className="btn btn-ghost btn-sm btn-icon" title="Delete" style={{ color:'var(--red-ink)' }} onClick={() => handleDeleteNote(f)}><Trash2 size={13}/></button>
+                        </div>
+                      )}
                     </div>
-                    <div style={{ fontSize:13, overflowWrap:'anywhere', whiteSpace:'pre-wrap' }}>{f.note}</div>
+                    {editingNote?.id === f.id ? (
+                      <>
+                        <textarea className="form-input" rows={3} autoFocus value={editingNote.text}
+                          onChange={e => setEditingNote({ ...editingNote, text: e.target.value })}/>
+                        <div style={{ display:'flex', gap:8, justifyContent:'flex-end', marginTop:6 }}>
+                          <button className="btn btn-ghost btn-sm" onClick={() => setEditingNote(null)} disabled={savingNote}>Cancel</button>
+                          <button className="btn btn-primary btn-sm" onClick={handleSaveNoteEdit} disabled={savingNote || !editingNote.text.trim()}>{savingNote ? 'Saving...' : 'Save'}</button>
+                        </div>
+                      </>
+                    ) : (
+                      <div style={{ fontSize:13, overflowWrap:'anywhere', whiteSpace:'pre-wrap' }}>
+                        {f.note}
+                        {f.editedAt && <span style={{ fontSize:11, color:'#9CA3AF' }}> (edited)</span>}
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}

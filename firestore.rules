@@ -145,7 +145,11 @@ service cloud.firestore {
         || (isActiveStaff()
             && (resource.data.assignedToEmail == myEmail()
                 || resource.data.assignedByEmail == myEmail()));
-      allow delete: if isCEO();
+      // Staff may delete only their own profile notes, never assigned follow-ups.
+      allow delete: if isCEO()
+        || (isActiveStaff()
+            && resource.data.kind == 'note'
+            && resource.data.assignedByEmail == myEmail());
     }
 
     // ── concerns — visible to raiser + assignee ──────────────────
