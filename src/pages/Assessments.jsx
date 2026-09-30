@@ -5,7 +5,8 @@ import {
   saveAssessmentResults, getAssessmentResults,
   addNotification, createRequest, updateTopLevelAssessment, getCourses,
 } from '../firebase/services';
-import { hasFeature, courseOfBatch } from '../lib/courses';
+import { hasFeature, courseOfBatch, batchesInCourse } from '../lib/courses';
+import { CourseSelect } from '../components/courses';
 import { Modal, Toast, Loading } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { Plus, Upload, Search, ClipboardList, Trash2, Eye } from 'lucide-react';
@@ -68,6 +69,7 @@ export default function Assessments({ filterBatchId = null }) {
 
   // Filters
   const [filterBatch,   setFilterBatch]   = useState(filterBatchId || '');
+  const [filterCourse,  setFilterCourse]  = useState('');
   const [filterStatus,  setFilterStatus]  = useState('');
   const [filterDate,    setFilterDate]    = useState('');
   const [searchTitle,   setSearchTitle]   = useState('');
@@ -147,8 +149,10 @@ export default function Assessments({ filterBatchId = null }) {
   // `title`. Show/search either.
   const assessName = (a) => a.title || a.testName || a.subject || '';
   const sortKey = (a) => a.date || (a.createdAt?.seconds ? new Date(a.createdAt.seconds * 1000).toISOString().slice(0, 10) : '');
+  const courseBatchIds = filterCourse ? new Set(batchesInCourse(batches, courses, filterCourse).map(b => b.id)) : null;
   const visible = assessments.filter(a => {
     if (filterBatch  && a.batchId !== filterBatch)                              return false;
+    if (courseBatchIds && !courseBatchIds.has(a.batchId))                       return false;
     if (filterStatus && a.status  !== filterStatus)                             return false;
     if (filterDate   && a.date    !== filterDate)                               return false;
     if (searchTitle  && !assessName(a).toLowerCase().includes(searchTitle.toLowerCase())) return false;
@@ -472,10 +476,17 @@ export default function Assessments({ filterBatchId = null }) {
           />
         </div>
         {!filterBatchId && (
+          <CourseSelect courses={courses} batches={batches} value={filterCourse} style={{ flex:'1 1 160px', minWidth:140, height:36 }}
+            onChange={v => {
+              setFilterCourse(v);
+              if (filterBatch && !batchesInCourse(batches, courses, v).some(b => b.id === filterBatch)) setFilterBatch('');
+            }} />
+        )}
+        {!filterBatchId && (
           <select className="form-input" style={{ flex:'1 1 160px', minWidth:140, height:36 }}
             value={filterBatch} onChange={e => setFilterBatch(e.target.value)}>
-            <option value="">All Batches</option>
-            {batches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+            <option value="">{filterCourse ? 'All batches in this course' : 'All Batches'}</option>
+            {batchesInCourse(batches, courses, filterCourse).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
         )}
         <select className="form-input" style={{ flex:'0 0 140px', height:36 }}
