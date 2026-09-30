@@ -164,7 +164,9 @@ export default function StudentProfile() {
     try {
       const s  = await getStudent(id).catch(() => null);
       const b  = await getBatches().catch(() => []);
-      const f  = await getFollowUps(id, { role: profile?.role, uid: profile?.uid, email: profile?.email }).catch(() => []);
+      // Use the sign-in email: rules compare against the auth token, and the
+      // staff doc's email can differ (e.g. in letter case).
+      const f  = await getFollowUps(id, { role: profile?.role, uid: profile?.uid, email: user?.email }).catch(() => []);
       const a  = await getAssessments(id).catch(() => []);       // student-level results added on this page
       const ba = s?.batchId ? await getStudentBatchAssessments(id, s.batchId).catch(() => []) : []; // batch/main-page assessments
       const st = await getStaffProfiles().catch(() => []);
@@ -322,8 +324,8 @@ export default function StudentProfile() {
           await deleteFollowUpNote(f.id);
           setFollowups(prev => prev.filter(x => x.id !== f.id));
           setToast({ message: 'Note deleted.', type: 'info' });
-        } catch {
-          setToast({ message: 'Could not delete the note.', type: 'error' });
+        } catch (err) {
+          setToast({ message: err?.code === 'permission-denied' ? 'Deleting notes is CEO-only right now. Ask the CEO to delete it.' : 'Could not delete the note.', type: 'error' });
         }
       },
     });
