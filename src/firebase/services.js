@@ -301,7 +301,6 @@ export const getAllFollowUps = async (scope = null) => {
     : query(collection(db,'followups'), limit(200));
   const snap = await getDocs(q);
   return snap.docs.map(d => ({ id: d.id, ...d.data() }))
-    .filter(f => !isFollowUpNote(f))
     .sort((a,b) => (b.createdAt?.seconds||0) - (a.createdAt?.seconds||0));
 };
 
@@ -309,8 +308,8 @@ export const addFollowUp = async (data) =>
   addDoc(collection(db,'followups'), { ...data, completed: false, createdAt: serverTimestamp() });
 
 // A note logged from a student's profile is a record of contact, not a task:
-// it's saved already closed and kept out of the follow-up tracker. It shows
-// only in that student's Follow-Up history.
+// it's saved already closed. Callers use isFollowUpNote to keep notes out of
+// the tracker (pending counts, Log & Close) and list them as a notes log.
 export const addFollowUpNote = async (data) =>
   addDoc(collection(db,'followups'), { ...data, kind: 'note', completed: true, createdAt: serverTimestamp() });
 
@@ -1000,7 +999,7 @@ export const subscribeAllFollowUps = (scope, cb) => {
         or(where('assignedToEmail','==',scope.email), where('assignedByEmail','==',scope.email)),
         limit(300))
     : query(collection(db,'followups'), limit(200));
-  return listen(q, cb, { sort: byCreatedDesc, filter: f => !isFollowUpNote(f) });
+  return listen(q, cb, { sort: byCreatedDesc });
 };
 
 // ── Concerns ───────────────────────────────────────────────────

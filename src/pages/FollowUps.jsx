@@ -1,12 +1,18 @@
 import { useEffect, useState } from 'react';
-import { subscribeAllFollowUps, getStudents, addFollowUp, completeFollowUp, notifyStaff, getStaffProfiles, getBatches, getBatchStudents } from '../firebase/services';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { subscribeAllFollowUps, isFollowUpNote, getStudents, addFollowUp, completeFollowUp, notifyStaff, getStaffProfiles, getBatches, getBatchStudents } from '../firebase/services';
 import { Modal, Toast, Loading, Avatar, FormRow } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
-import { Plus, Search, Mail, CheckCircle, Clock } from 'lucide-react';
+import { Plus, Search, Mail, CheckCircle, Clock, StickyNote } from 'lucide-react';
 
 export default function FollowUps() {
   const { profile, user } = useAuth();
-  const [followups, setFollowups]   = useState([]);
+  const location = useLocation();
+  const navigate = useNavigate();
+  // 'tracker' = assigned follow-ups; 'notes' = contact notes logged from a
+  // student's profile (already done — a record, not a task).
+  const [view, setView]             = useState(location.state?.view === 'notes' ? 'notes' : 'tracker');
+  const [allFollowups, setAllFollowups] = useState([]);
   const [students, setStudents]     = useState([]);
   const [staff, setStaff]           = useState([]);
   const [batches, setBatches]       = useState([]);
@@ -55,7 +61,7 @@ export default function FollowUps() {
   useEffect(() => {
     if (!profile?.role) return;
     const sc = { role: profile.role, uid: profile.uid, email: user?.email };
-    return subscribeAllFollowUps(sc, (f) => { setFollowups(f); setLoading(false); });
+    return subscribeAllFollowUps(sc, (f) => { setAllFollowups(f); setLoading(false); });
   }, [profile?.role, profile?.uid, user?.email]);
 
   // Load the chosen batch's full student roster (the general list is paginated).
@@ -64,6 +70,15 @@ export default function FollowUps() {
     getBatchStudents(form.batchId, scope).then(r => setBatchStudentsList(r.students || [])).catch(() => setBatchStudentsList([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.batchId]);
+
+  const followups = allFollowups.filter(f => !isFollowUpNote(f));
+  const notes     = allFollowups.filter(isFollowUpNote);
+
+  const filteredNotes = notes.filter(n => {
+    const q = search.toLowerCase();
+    return !q || n.studentName?.toLowerCase().includes(q) || n.note?.toLowerCase().includes(q)
+      || (n.addedBy || n.assignedBy)?.toLowerCase().includes(q);
+  });
 
   const filtered = followups.filter(f => {
     const q = search.toLowerCase();
@@ -144,6 +159,12 @@ export default function FollowUps() {
     return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
   };
 
+  const formatDateTime = (ts) => {
+    if (!ts) return '—';
+    const d = ts.toDate ? ts.toDate() : new Date(ts);
+    return d.toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  };
+
   const toggleExpanded = (id) => setExpanded(prev => {
     const next = new Set(prev);
     if (next.has(id)) next.delete(id); else next.add(id);
@@ -200,14 +221,63 @@ export default function FollowUps() {
         </div>
       )}
 
+      {/* View switch: assigned follow-ups vs. notes logged on student profiles */}
+      <div style={{ display: 'inline-flex', gap: 4, padding: 4, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 'var(--radius-pill)', marginBottom: 12, maxWidth: '100%' }}>
+        {[
+          { key: 'tracker', label: 'Assigned Follow-Ups', count: followups.length },
+          { key: 'notes',   label: 'Notes Log',           count: notes.length },
+        ].map(t => {
+          const isActive = view === t.key;
+          return (
+            <button key={t.key} onClick={() => setView(t.key)}
+              style={{ padding: '6px 14px', borderRadius: 'var(--radius-pill)', border: 'none', cursor: 'pointer', fontSize: 12.5, fontWeight: 600, whiteSpace: 'nowrap', background: isActive ? 'var(--surface)' : 'transparent', color: isActive ? 'var(--brand-ink)' : 'var(--text-sub)', boxShadow: isActive ? 'var(--shadow-sm)' : 'none' }}>
+              {t.label} <span style={{ fontSize: 11, color: isActive ? 'var(--brand)' : 'var(--text-muted)', fontWeight: 500 }}>{t.count}</span>
+            </button>
+          );
+        })}
+      </div>
+
       {/* Search row */}
       <div style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
         <div className="search-bar" style={{ flex: 1, minWidth: 200 }}>
           <Search size={15} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
-          <input placeholder="Search student, staff, note..." value={search} onChange={e => setSearch(e.target.value)} />
+          <input placeholder={view === 'notes' ? 'Search student, note, author...' : 'Search student, staff, note...'} value={search} onChange={e => setSearch(e.target.value)} />
         </div>
       </div>
 
+      {view === 'notes' && (
+        <>
+          <div style={{ padding: '10px 14px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12, color: 'var(--text-sub)', marginBottom: 14, display: 'flex', gap: 8 }}>
+            <StickyNote size={14} style={{ flexShrink: 0, marginTop: 1 }} />
+            Notes logged from a student's profile after contacting them. These record follow-ups already done — nothing to assign or close.
+          </div>
+          {filteredNotes.length === 0 && (
+            <div className="card" style={{ textAlign: 'center', color: 'var(--muted)', padding: 32 }}>No notes found.</div>
+          )}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {filteredNotes.map(n => (
+              <div key={n.id} className="card" style={{ padding: 14, borderLeft: '3px solid var(--brand)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                  <Avatar name={n.studentName || '?'} size="sm" />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div onClick={() => n.studentId && navigate(`/students/${n.studentId}`)}
+                      style={{ fontWeight: 600, fontSize: 14, cursor: n.studentId ? 'pointer' : 'default', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {n.studentName || 'Unknown student'}
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      Noted by {n.addedBy || n.assignedBy || 'Staff'} · {formatDateTime(n.createdAt)}
+                    </div>
+                  </div>
+                  <span className="badge badge-gray"><StickyNote size={11} style={{ marginRight: 3 }} />Note</span>
+                </div>
+                <div style={{ fontSize: 13, lineHeight: 1.5, overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>{n.note}</div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {view === 'tracker' && (<>
       {/* Status filter chips */}
       <div style={{ display:'flex', gap:6, flexWrap:'wrap', marginBottom:14 }}>
         {[
@@ -305,6 +375,7 @@ export default function FollowUps() {
           </tbody>
         </table>
       </div>
+      </>)}
 
       {/* Assign Modal */}
       {showModal && (

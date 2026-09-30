@@ -720,7 +720,7 @@ export default function StudentProfile() {
               {followups.slice(0,3).map(f => (
                 <div key={f.id} style={{ padding:'8px 0', borderBottom:'1px solid #F3F4F6' }}>
                   <div style={{ fontSize:12, color:'#9CA3AF', marginBottom:2 }}>{fmt(f.createdAt)} · {f.addedBy || f.assignedBy}</div>
-                  <div style={{ fontSize:13, overflowWrap:'anywhere', display:'-webkit-box', WebkitLineClamp:3, WebkitBoxOrient:'vertical', overflow:'hidden' }}>{f.note}</div>
+                  <div style={{ fontSize:13, overflowWrap:'anywhere', whiteSpace:'pre-wrap' }}>{f.note}</div>
                 </div>
               ))}
               {followups.length === 0 && <div style={{ fontSize:13, color:'#9CA3AF' }}>No follow-ups yet.</div>}
