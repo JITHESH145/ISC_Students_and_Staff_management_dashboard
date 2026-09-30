@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { subscribeAllFollowUps, isFollowUpNote, updateFollowUpNote, deleteFollowUpNote, getStudents, addFollowUp, completeFollowUp, notifyStaff, getStaffProfiles, getBatches, getBatchStudents } from '../firebase/services';
+import { subscribeAllFollowUps, isFollowUpNote, updateFollowUpNote, deleteFollowUpNote, getStudent, getStudents, addFollowUp, completeFollowUp, notifyStaff, getStaffProfiles, getBatches, getBatchStudents } from '../firebase/services';
 import { Modal, Toast, Loading, Avatar, FormRow, Confirm } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
 import { Plus, Search, Mail, CheckCircle, Clock, StickyNote, Edit, Trash2 } from 'lucide-react';
@@ -27,6 +27,8 @@ export default function FollowUps() {
   const [saving, setSaving]         = useState(false);
   const [expanded, setExpanded]     = useState(() => new Set());
   const [editingNote, setEditingNote] = useState(null); // { id, text }
+  const [studentBatch, setStudentBatch] = useState({}); // studentId → batchId, for notes
+  const [noteBatch, setNoteBatch]   = useState('');       // Notes Log batch filter
   const [confirmBox, setConfirmBox] = useState(null);
   const [form, setForm] = useState({
     batchId: '',
@@ -76,10 +78,29 @@ export default function FollowUps() {
   const followups = allFollowups.filter(f => !isFollowUpNote(f));
   const notes     = allFollowups.filter(isFollowUpNote);
 
+  // Batch for each note: stored on newer notes; otherwise looked up from the
+  // student. The picker list is paginated, so missing students are fetched.
+  useEffect(() => {
+    const known = new Set(students.map(s => s.id));
+    const missing = [...new Set(allFollowups
+      .filter(f => isFollowUpNote(f) && !f.batchId && f.studentId && !known.has(f.studentId))
+      .map(f => f.studentId))];
+    const todo = missing.filter(sid => !(sid in studentBatch));
+    if (!todo.length) return;
+    Promise.all(todo.map(sid => getStudent(sid).then(s => [sid, s?.batchId || null]).catch(() => [sid, null])))
+      .then(pairs => setStudentBatch(prev => ({ ...prev, ...Object.fromEntries(pairs) })));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allFollowups, students]);
+
+  const noteBatchId = (n) => n.batchId || students.find(s => s.id === n.studentId)?.batchId || studentBatch[n.studentId] || '';
+  const noteBatchName = (n) => batches.find(b => b.id === noteBatchId(n))?.name || n.batchName || '';
+
   const filteredNotes = notes.filter(n => {
+    if (noteBatch && noteBatchId(n) !== noteBatch) return false;
     const q = search.toLowerCase();
     return !q || n.studentName?.toLowerCase().includes(q) || n.note?.toLowerCase().includes(q)
-      || (n.addedBy || n.assignedBy)?.toLowerCase().includes(q);
+      || (n.addedBy || n.assignedBy)?.toLowerCase().includes(q)
+      || noteBatchName(n).toLowerCase().includes(q);
   });
 
   const filtered = followups.filter(f => {
@@ -274,8 +295,15 @@ export default function FollowUps() {
       <div style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
         <div className="search-bar" style={{ flex: 1, minWidth: 200 }}>
           <Search size={15} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
-          <input placeholder={view === 'notes' ? 'Search student, note, author...' : 'Search student, staff, note...'} value={search} onChange={e => setSearch(e.target.value)} />
+          <input placeholder={view === 'notes' ? 'Search student, batch, note, author...' : 'Search student, staff, note...'} value={search} onChange={e => setSearch(e.target.value)} />
         </div>
+        {view === 'notes' && (
+          <select className="form-input" style={{ width: 'auto', minWidth: 160, maxWidth: '100%' }}
+            value={noteBatch} onChange={e => setNoteBatch(e.target.value)}>
+            <option value="">All batches</option>
+            {batches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+          </select>
+        )}
       </div>
 
       {view === 'notes' && (
@@ -297,6 +325,11 @@ export default function FollowUps() {
                       style={{ fontWeight: 600, fontSize: 14, cursor: n.studentId ? 'pointer' : 'default', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {n.studentName || 'Unknown student'}
                     </div>
+                    {noteBatchName(n) && (
+                      <div style={{ fontSize: 12, color: 'var(--brand-ink)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        Batch: {noteBatchName(n)}
+                      </div>
+                    )}
                     <div style={{ fontSize: 11, color: 'var(--muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       Noted by {n.addedBy || n.assignedBy || 'Staff'} · {formatDateTime(n.createdAt)}
                     </div>

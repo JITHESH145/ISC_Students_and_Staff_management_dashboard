@@ -277,6 +277,8 @@ export default function StudentProfile() {
       // the write is rejected with permission-denied.
       await addFollowUpNote({
         studentId: id, studentName: student.name, note: newNote,
+        batchId: student.batchId || '',
+        batchName: batches.find(b => b.id === student.batchId)?.name || '',
         addedBy: profile?.name || 'Staff',
         assignedBy: profile?.name || 'Staff',
         assignedByEmail: user?.email,
