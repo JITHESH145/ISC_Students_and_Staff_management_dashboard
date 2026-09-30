@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
-  getBatches, getBatchStudentCount, getTasks, getAllFollowUps,
+  getBatches, getBatchStudentCount, getTasks, getAllFollowUps, isFollowUpNote,
   getRequests, addNotification, updateRequest, markNotificationRead,
   getBatchSchedules, getAssessments, getBatchTasks,
 } from '../firebase/services';
@@ -723,9 +723,11 @@ export default function Dashboard() {
             )}
             {filteredActivity.map((item, i) => {
               const isFollowup = item._type === 'followup';
+              // Notes logged from a student profile show as notes, not assignments.
+              const isNote = isFollowup && isFollowUpNote(item);
               return (
                 <div key={item.id || i}
-                  onClick={() => navigate(isFollowup ? '/followups' : '/tasks')}
+                  onClick={() => navigate(isFollowup ? '/followups' : '/tasks', isNote ? { state: { view: 'notes' } } : undefined)}
                   style={{ display:'flex', alignItems:'flex-start', gap:11, padding:10, borderRadius:10, cursor:'pointer', transition:'background .12s' }}
                   onMouseEnter={e => e.currentTarget.style.background='var(--surface-hover)'}
                   onMouseLeave={e => e.currentTarget.style.background='transparent'}>
@@ -740,7 +742,7 @@ export default function Dashboard() {
                       {isFollowup ? (item.studentName || 'Unknown student') : `Task · ${item.title || 'Task'}`}
                     </div>
                     <div style={{ fontSize:11.5, color:'var(--text-muted)', marginTop:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                      {isFollowup ? item.note : `Assigned to ${item.assignedTo || '—'}`}
+                      {isNote ? `Note by ${item.addedBy || item.assignedBy || 'Staff'}: ${item.note || ''}` : isFollowup ? item.note : `Assigned to ${item.assignedTo || '—'}`}
                     </div>
                   </div>
                   <div style={{ fontSize:11, color:'var(--text-muted)', whiteSpace:'nowrap', flexShrink:0, marginTop:2 }}>
