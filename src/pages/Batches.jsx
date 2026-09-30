@@ -826,7 +826,7 @@ export default function Batches() {
   // and remain viewable on each student's profile). Confirm so it's deliberate.
   const removeEditField = (idx) => {
     const f = editFields[idx];
-    if (f.key === 'name') { setToast({ message:'The Kids Name field is required and cannot be removed.', type:'error' }); return; }
+    if (f.key === 'name') { setToast({ message:`The ${f.label || 'Name'} field is required and cannot be removed.`, type:'error' }); return; }
     setConfirmDialog({
       message: `Remove the "${f.label}" field? The column disappears from the table and add-student form, but any data already captured for existing students is kept and stays visible on each student's profile under "Additional Details".`,
       onConfirm: () => setEditFields(prev => prev.filter(x => x.key !== f.key)),
@@ -1352,6 +1352,8 @@ export default function Batches() {
     const activeTab = tabs.some(t => t.key === rawTab) ? rawTab : 'students';
     const batchFlow = flowOn ? (selectedBatch.courseFlow || DEFAULT_COURSE_FLOW) : [];
     const batchFields = selectedBatch.studentFields || DEFAULT_STUDENT_FIELDS;
+    // The name column uses the batch's own label ("Kids Name", "Name", ...).
+    const nameLabel = batchFields.find(f => f.key === 'name')?.label || 'Name';
     const batchSubjects = selectedBatch.subjects || [];
     const batchStaffDetails = selectedBatch.staffDetails || [];
     const flowAnalytics = getFlowAnalytics();
@@ -1614,7 +1616,7 @@ export default function Batches() {
                 <table style={{ minWidth: 900 }}>
                   <thead>
                     <tr>
-                      <th>Kids Name</th>
+                      <th>{nameLabel}</th>
                       {listFields.map(f => <th key={f.key}>{f.label}</th>)}
                       {flowCols.map(step => <th key={step.key}>{step.fieldLabel || step.label}</th>)}
                       <th>Status</th>
@@ -2680,7 +2682,7 @@ export default function Batches() {
           <Modal title={`Configure Student Fields — ${selectedBatch.name}`} onClose={() => setShowFieldConfig(false)} wide persistent>
             <div style={{ fontSize:12.5, color:'var(--text-sub)', marginBottom:12, background:'var(--brand-50)', padding:'8px 12px', borderRadius:8 }}>
               Tick <strong>Show in list</strong> to display that field as a column in the students table.
-              The <strong>Kids Name</strong>, <strong>Status</strong>, <strong>Onboarding</strong> and <strong>View</strong> columns are always shown.
+              The <strong>{nameLabel}</strong>, <strong>Status</strong>, <strong>Onboarding</strong> and <strong>View</strong> columns are always shown.
               Use the <strong>↑ ↓</strong> arrows to reorder fields — always reorder this way, never by renaming labels
               (each field's data is tied to its permanent <em>id</em>, not its label). Removing a field hides its column but
               keeps data already saved for existing students, viewable on each student's profile.
