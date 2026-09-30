@@ -336,6 +336,11 @@ export default function StaffDashboard() {
   }).sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
   const recentCourseIds = recentCourse ? new Set(batchesInCourse(myBatches, courses, recentCourse).map(b => b.id)) : null;
   const newStudentsShown = newStudents.filter(s => !recentCourseIds || recentCourseIds.has(s.batchId));
+  // Hub: once the staff member's batches are in courses, pick a course first —
+  // batch buttons and activity stay hidden until then.
+  const myCourses  = courses.filter(c => myBatches.some(b => b.courseId === c.id));
+  const needCourse = myCourses.length > 0 && !hubCourseId;
+  const shownHubBatch = needCourse ? '' : hubBatch;
 
   return (
     <div>
@@ -550,7 +555,7 @@ export default function StaffDashboard() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                 <h3 style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>Batch Activity Hub <span style={{ fontSize: 12, color: '#9CA3AF', fontWeight: 400 }}>(active only)</span></h3>
-                <CourseSelect courses={courses.filter(c => myBatches.some(b => b.courseId === c.id))} batches={myBatches}
+                <CourseSelect courses={myCourses} batches={myBatches}
                   value={hubCourseId} style={{ height: 32, fontSize: 12 }}
                   onChange={v => {
                     setHubCourseId(v);
@@ -559,7 +564,8 @@ export default function StaffDashboard() {
                   }} />
               </div>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                {batchesInCourse(myBatches, courses, hubCourseId).map(b => (
+                {needCourse && <span style={{ fontSize: 12, color: '#9CA3AF' }}>Select a course from the dropdown to see its batches.</span>}
+                {!needCourse && batchesInCourse(myBatches, courses, hubCourseId).map(b => (
                   <button key={b.id} onClick={() => { setHubBatch(prev => prev === b.id ? '' : b.id); setHubFilter('all'); setHubTypeFilter(''); setHubSearch(''); setHubPage(0); }}
                     style={{ padding: '5px 14px', borderRadius: 20, border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600, transition: 'all 0.15s',
                       background: hubBatch === b.id ? 'var(--brand)' : '#F3F4F6',
@@ -571,7 +577,7 @@ export default function StaffDashboard() {
             </div>
 
             {/* Filter bar */}
-            {hubBatch && (
+            {shownHubBatch && (
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12, padding: '10px 12px', background: '#F8FAFC', borderRadius: 10, border: '1px solid #E5E7EB' }}>
                 {/* Type dropdown */}
                 <select value={hubFilter} onChange={e => { setHubFilter(e.target.value); setHubTypeFilter(''); setHubPage(0); }}
@@ -628,15 +634,15 @@ export default function StaffDashboard() {
             )}
 
             {/* Content */}
-            {!hubBatch && (
+            {!shownHubBatch && (
               <div style={{ textAlign: 'center', color: '#9CA3AF', padding: '28px 0', fontSize: 13 }}>
-                {myBatches.length === 0 ? 'No batches assigned yet.' : 'Select a batch above to view its classes, assessments and tasks.'}
+                {myBatches.length === 0 ? 'No batches assigned yet.' : needCourse ? 'Select a course, then a batch, to view its classes, assessments and tasks.' : 'Select a batch above to view its classes, assessments and tasks.'}
               </div>
             )}
-            {hubBatch && hubLoading && (
+            {shownHubBatch && hubLoading && (
               <div style={{ textAlign: 'center', color: '#9CA3AF', padding: '20px 0', fontSize: 13 }}>Loading…</div>
             )}
-            {hubBatch && !hubLoading && (
+            {shownHubBatch && !hubLoading && (
               <>
                 {/* Count row */}
                 <div style={{ display: 'flex', gap: 16, marginBottom: 10, fontSize: 12, color: '#6B7280', flexWrap: 'wrap' }}>

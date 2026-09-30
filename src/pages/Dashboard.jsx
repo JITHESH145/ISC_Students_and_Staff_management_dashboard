@@ -56,6 +56,11 @@ function BatchActivityHub({ batches, courses = [], schedBatch, setSchedBatch, sc
   const [search, setSearch] = useState('');
   const [hubCourse, setHubCourse] = useState('');
   const hubBatches = batchesInCourse(batches, courses, hubCourse);
+  // Once courses exist, pick a course first: batch buttons and activity stay
+  // hidden until then so the hub isn't crowded with every batch.
+  const courseFilterShown = courses.some(c => c.status !== 'archived' || batches.some(b => b.courseId === c.id));
+  const needCourse = courseFilterShown && !hubCourse;
+  const shownBatch = needCourse ? '' : schedBatch;
 
   const kindColors = {
     schedule:   { dot:'var(--blue)',  bg:'var(--blue-soft)',   ink:'var(--blue-ink)'  },
@@ -90,8 +95,9 @@ function BatchActivityHub({ batches, courses = [], schedBatch, setSchedBatch, sc
               }} />
           </div>
           <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
-            {hubBatches.length === 0 && <span style={{ fontSize:12, color:'var(--text-muted)' }}>No batches in this course.</span>}
-            {hubBatches.map(b => (
+            {needCourse && <span style={{ fontSize:12, color:'var(--text-muted)' }}>Select a course from the dropdown to see its batches.</span>}
+            {!needCourse && hubBatches.length === 0 && <span style={{ fontSize:12, color:'var(--text-muted)' }}>No batches in this course.</span>}
+            {!needCourse && hubBatches.map(b => (
               <button key={b.id} onClick={() => { setSchedBatch(b.id); clearAll(); }}
                 style={{ padding:'5px 14px', borderRadius:20, border:'none', cursor:'pointer', fontSize:12, fontWeight:600, transition:'all .15s',
                   background: schedBatch === b.id ? 'var(--brand)' : 'var(--surface-sunken)',
@@ -102,14 +108,14 @@ function BatchActivityHub({ batches, courses = [], schedBatch, setSchedBatch, sc
           </div>
         </div>
 
-        {!schedBatch && (
+        {!shownBatch && (
           <div style={{ textAlign:'center', color:'var(--text-muted)', padding:'36px 0', fontSize:13 }}>
             <Calendar size={28} style={{ color:'var(--border)', display:'block', margin:'0 auto 8px' }} />
-            Select a batch above to view its classes, assessments and tasks
+            {needCourse ? 'Select a course, then a batch, to view its classes, assessments and tasks' : 'Select a batch above to view its classes, assessments and tasks'}
           </div>
         )}
 
-        {schedBatch && (
+        {shownBatch && (
           <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'center', marginBottom:12, padding:'10px 12px', background:'var(--surface-sunken)', borderRadius:10, border:'1px solid var(--border)' }}>
             <select value={schedFilter} onChange={e => { setSchedFilter(e.target.value); setSchedTypeFilter(''); }}
               style={{ padding:'6px 12px', borderRadius:8, border:'1px solid var(--border)', fontSize:12, fontWeight:600, background:'var(--surface)', color:'var(--text)', cursor:'pointer' }}>
@@ -138,11 +144,11 @@ function BatchActivityHub({ batches, courses = [], schedBatch, setSchedBatch, sc
         )}
       </div>
 
-      {schedBatch && schedLoading && (
+      {shownBatch && schedLoading && (
         <div style={{ textAlign:'center', color:'var(--text-muted)', padding:'24px 0', fontSize:13 }}>Loading…</div>
       )}
 
-      {schedBatch && !schedLoading && (
+      {shownBatch && !schedLoading && (
         <div style={{ padding:'0 20px 20px' }}>
           <div style={{ fontSize:12, color:'var(--text-muted)', marginBottom:10 }}>
             <span style={{ fontWeight:600, color:'var(--text)' }}>{list.length} item{list.length !== 1 ? 's' : ''}</span>
