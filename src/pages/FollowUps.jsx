@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { subscribeAllFollowUps, isFollowUpNote, updateFollowUpNote, deleteFollowUpNote, getStudent, getStudents, addFollowUp, completeFollowUp, notifyStaff, getStaffProfiles, getBatches, getBatchStudents } from '../firebase/services';
+import { subscribeAllFollowUps, isFollowUpNote, updateFollowUpNote, deleteFollowUpNote, getStudent, getStudents, addFollowUp, completeFollowUp, notifyStaff, getStaffProfiles, getBatches, getBatchStudents, getCourses } from '../firebase/services';
 import { Modal, Toast, Loading, Avatar, FormRow, Confirm } from '../components/ui';
 import { useAuth } from '../context/AuthContext';
+import { batchesInCourse } from '../lib/courses';
+import { CourseSelect } from '../components/courses';
 import { Plus, Search, Mail, CheckCircle, Clock, StickyNote, Edit, Trash2 } from 'lucide-react';
 
 export default function FollowUps() {
@@ -29,6 +31,8 @@ export default function FollowUps() {
   const [editingNote, setEditingNote] = useState(null); // { id, text }
   const [studentBatch, setStudentBatch] = useState({}); // studentId → batchId, for notes
   const [noteBatch, setNoteBatch]   = useState('');       // Notes Log batch filter
+  const [noteCourse, setNoteCourse] = useState('');       // Notes Log course filter
+  const [courses, setCourses]       = useState([]);
   const [confirmBox, setConfirmBox] = useState(null);
   const [form, setForm] = useState({
     batchId: '',
@@ -53,10 +57,11 @@ export default function FollowUps() {
   useEffect(() => {
     if (!profile?.role) return;
     const sc = { role: profile.role, uid: profile.uid, email: user?.email };
-    Promise.all([getStudents(sc), getStaffProfiles(), getBatches().catch(() => [])]).then(([s, st, b]) => {
+    Promise.all([getStudents(sc), getStaffProfiles(), getBatches().catch(() => []), getCourses()]).then(([s, st, b, c]) => {
       setStudents(s);
       setStaff(st.filter(x => x.active !== false && x.role !== 'ceo'));
       setBatches(b || []);
+      setCourses(c);
     });
   }, [profile?.role, profile?.uid, user?.email]);
 
@@ -95,8 +100,10 @@ export default function FollowUps() {
   const noteBatchId = (n) => n.batchId || students.find(s => s.id === n.studentId)?.batchId || studentBatch[n.studentId] || '';
   const noteBatchName = (n) => batches.find(b => b.id === noteBatchId(n))?.name || n.batchName || '';
 
+  const noteCourseIds = noteCourse ? new Set(batchesInCourse(batches, courses, noteCourse).map(b => b.id)) : null;
   const filteredNotes = notes.filter(n => {
     if (noteBatch && noteBatchId(n) !== noteBatch) return false;
+    if (noteCourseIds && !noteCourseIds.has(noteBatchId(n))) return false;
     const q = search.toLowerCase();
     return !q || n.studentName?.toLowerCase().includes(q) || n.note?.toLowerCase().includes(q)
       || (n.addedBy || n.assignedBy)?.toLowerCase().includes(q)
@@ -298,10 +305,17 @@ export default function FollowUps() {
           <input placeholder={view === 'notes' ? 'Search student, batch, note, author...' : 'Search student, staff, note...'} value={search} onChange={e => setSearch(e.target.value)} />
         </div>
         {view === 'notes' && (
+          <CourseSelect courses={courses} batches={batches} value={noteCourse} style={{ minWidth: 150, maxWidth: '100%' }}
+            onChange={v => {
+              setNoteCourse(v);
+              if (noteBatch && !batchesInCourse(batches, courses, v).some(b => b.id === noteBatch)) setNoteBatch('');
+            }} />
+        )}
+        {view === 'notes' && (
           <select className="form-input" style={{ width: 'auto', minWidth: 160, maxWidth: '100%' }}
             value={noteBatch} onChange={e => setNoteBatch(e.target.value)}>
-            <option value="">All batches</option>
-            {batches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
+            <option value="">{noteCourse ? 'All batches in this course' : 'All batches'}</option>
+            {batchesInCourse(batches, courses, noteCourse).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
           </select>
         )}
       </div>
